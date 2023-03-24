@@ -37,7 +37,7 @@ def mlp_post(value, hook):
     post = value.detach().clone().cpu()
     return value
 
-layer_to_hook = 3
+layer_to_hook = 9
 
 fwd_hooks = [
     (utils.get_act_name("attn_out", layer_to_hook), mlp_pre),
@@ -90,4 +90,8 @@ for epoch in range(10):
 
         print(f"Epoch: {epoch} step {idx}, S Loss: {s_loss}, G Loss: {g_loss}")
     print(f"end Epoch: {epoch}, S Loss: {s_loss_total/len(loader)}, G Loss: {g_loss_total/len(loader)}")
+    print('saving')
+
+    torch.save(solu_layer.state_dict(), f"solu_{epoch}.pt")
+    torch.save(gelu_layer.state_dict(), f"gelu_{epoch}.pt")
 
