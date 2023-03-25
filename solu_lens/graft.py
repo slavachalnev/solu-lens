@@ -64,9 +64,13 @@ class PrePostActivationDataset(Dataset):
 
 pre_activations_path = os.path.join(checkpoint_dir, "pre_activations.npy")
 post_activations_path = os.path.join(checkpoint_dir, "post_activations.npy")
+val_pre_activations_path = os.path.join(checkpoint_dir, "val_pre_activations.npy")
+val_post_activations_path = os.path.join(checkpoint_dir, "val_post_activations.npy")
 
 dataset = PrePostActivationDataset(pre_activations_path, post_activations_path)
 data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
+val_dataset = PrePostActivationDataset(val_pre_activations_path, val_post_activations_path)
+val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
 for epoch in range(1000):
     s_loss_total = 0
     bs_loss_total = 0
@@ -103,6 +107,40 @@ for epoch in range(1000):
             writer.add_scalar("Loss/BS", bs_loss.item(), epoch * len(data_loader) + idx)
 
         print(f"Epoch: {epoch} step {idx}, S Loss: {s_loss}, BS Loss: {bs_loss}, G Loss: {g_loss}")
+
+    # val
+    # eval mode
+    solu_layer.eval()
+    big_solu_layer.eval()
+    gelu_layer.eval()
+
+    s_loss_total = 0
+    bs_loss_total = 0
+    g_loss_total = 0
+
+    for idx, (pre_batch, post_batch) in enumerate(val_dataloader):
+        pre_batch = pre_batch.to(device)
+        post_batch = post_batch.to(device)
+
+        with torch.no_grad():
+            s_loss = criterion(solu_layer(pre_batch), post_batch)
+            bs_loss = criterion(big_solu_layer(pre_batch), post_batch)
+            g_loss = criterion(gelu_layer(pre_batch), post_batch)
+
+        s_loss_total += s_loss.item()
+        bs_loss_total += bs_loss.item()
+        g_loss_total += g_loss.item()
+    
+    writer.add_scalar("Val Loss/S", s_loss_total / len(val_dataloader), epoch)
+    writer.add_scalar("Val Loss/G", g_loss_total / len(val_dataloader), epoch)
+    writer.add_scalar("Val Loss/BS", bs_loss_total / len(val_dataloader), epoch)
+
+    
+    # train mode
+    solu_layer.train()
+    big_solu_layer.train()
+    gelu_layer.train()
+
     print(f"end Epoch: {epoch}, S Loss: {s_loss_total / len(data_loader)}, BS Loss: {bs_loss_total / len(data_loader)}, G Loss: {g_loss_total / len(data_loader)}")
 
 
