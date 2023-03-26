@@ -9,16 +9,16 @@ from torch.utils.data import DataLoader, Dataset
 #gpt2
 from transformers import AutoTokenizer, AutoModel
 
-# import transformer_lens
-# from transformer_lens import HookedTransformer
+import transformer_lens
+from transformer_lens import HookedTransformer
 # from transformer_lens import utils
 
 from mlp import SoluMLP, GeluMLP
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
-gpt2 = AutoModel.from_pretrained("gpt2")
+gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
+# gpt2 = AutoModel.from_pretrained("gpt2")
 
 for name, module in gpt2.named_modules():
     print(f"{name}: {module.__class__.__name__}")
@@ -42,7 +42,11 @@ solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_mo
 big_solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 gelu_layer = GeluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
 
-orig = copy.deepcopy(gpt2.h[layer_to_hook].mlp) ###
+# orig = copy.deepcopy(gpt2.h[layer_to_hook].mlp) ###
+orig = copy.deepcopy(gpt2.blocks[layer_to_hook].mlp) ###
+print("orig: ")
+print(orig)
+
 
 models = [solu_layer, big_solu_layer, gelu_layer, orig]
 names = ["solu", "big_solu", "gelu", "orig"]
@@ -68,8 +72,12 @@ class PrePostActivationDataset(Dataset):
         return len(self.pre_activations)
 
     def __getitem__(self, idx):
-        pre_act = torch.tensor(self.pre_activations[idx], dtype=torch.float32)
-        post_act = torch.tensor(self.post_activations[idx], dtype=torch.float32)
+        if self.add_random and idx >= len(self.pre_activations):
+            # generate random pre_act
+            pre_act = torch.randn(self.pre_activations.shape[1:])
+        else:
+            pre_act = torch.tensor(self.pre_activations[idx], dtype=torch.float32)
+            post_act = torch.tensor(self.post_activations[idx], dtype=torch.float32)
         return pre_act, post_act
 
 pre_activations_path = os.path.join(checkpoint_dir, "pre_activations.npy")
@@ -77,7 +85,7 @@ post_activations_path = os.path.join(checkpoint_dir, "post_activations.npy")
 val_pre_activations_path = os.path.join(checkpoint_dir, "val_pre_activations.npy")
 val_post_activations_path = os.path.join(checkpoint_dir, "val_post_activations.npy")
 
-dataset = PrePostActivationDataset(pre_activations_path, post_activations_path)
+dataset = PrePostActivationDataset(pre_activations_path, post_activations_path, add_random=False)
 data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
 val_dataset = PrePostActivationDataset(val_pre_activations_path, val_post_activations_path)
 val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
@@ -87,8 +95,8 @@ for epoch in range(1000):
 
     for idx, (pre_batch, post_batch) in enumerate(data_loader):
         # flatten batch
-        pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
-        post_batch = post_batch.view(-1, post_batch.shape[-1])
+        # pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
+        # post_batch = post_batch.view(-1, post_batch.shape[-1])
         pre_batch = pre_batch.to(device)
         post_batch = post_batch.to(device)
 
@@ -110,8 +118,8 @@ for epoch in range(1000):
     val_loss_totals = [0 for _ in models]
 
     for idx, (pre_batch, post_batch) in enumerate(val_dataloader):
-        pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
-        post_batch = post_batch.view(-1, post_batch.shape[-1])
+        # pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
+        # post_batch = post_batch.view(-1, post_batch.shape[-1])
         pre_batch = pre_batch.to(device)
         post_batch = post_batch.to(device)
 
