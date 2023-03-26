@@ -44,19 +44,20 @@ gelu_layer = GeluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_mo
 
 # orig = copy.deepcopy(gpt2.h[layer_to_hook].mlp) ###
 orig = copy.deepcopy(gpt2.blocks[layer_to_hook].mlp) ###
+orig.to(device)
 print("orig: ")
 print(orig)
 
 
-models = [solu_layer, big_solu_layer, gelu_layer, orig]
-names = ["solu", "big_solu", "gelu", "orig"]
+models = [solu_layer, big_solu_layer, gelu_layer]#, orig]
+names = ["solu", "big_solu", "gelu"]#, "orig"]
 
 for model in models:
     model.to(device)
     model.train()
 
 criterion = nn.MSELoss()
-optimisers = [torch.optim.AdamW(m.parameters(), lr=2e-4) for m in models]
+optimisers = [torch.optim.AdamW(m.parameters(), lr=5e-4) for m in models]
 
 writer = SummaryWriter()
 
@@ -74,7 +75,11 @@ class PrePostActivationDataset(Dataset):
     def __getitem__(self, idx):
         if self.add_random and idx >= len(self.pre_activations):
             # generate random pre_act
-            pre_act = torch.randn(self.pre_activations.shape[1:])
+            pre_act = torch.randn(self.pre_activations.shape[1:]).to(device)
+            with torch.no_grad():
+                post_act = orig(pre_act.unsqueeze(0))[0]
+            pre_act = pre_act.cpu()
+            post_act = post_act.cpu()
         else:
             pre_act = torch.tensor(self.pre_activations[idx], dtype=torch.float32)
             post_act = torch.tensor(self.post_activations[idx], dtype=torch.float32)
@@ -85,7 +90,7 @@ post_activations_path = os.path.join(checkpoint_dir, "post_activations.npy")
 val_pre_activations_path = os.path.join(checkpoint_dir, "val_pre_activations.npy")
 val_post_activations_path = os.path.join(checkpoint_dir, "val_post_activations.npy")
 
-dataset = PrePostActivationDataset(pre_activations_path, post_activations_path, add_random=False)
+dataset = PrePostActivationDataset(pre_activations_path, post_activations_path, add_random=True)
 data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
 val_dataset = PrePostActivationDataset(val_pre_activations_path, val_post_activations_path)
 val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
