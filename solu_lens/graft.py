@@ -5,16 +5,24 @@ import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
-# from datasets import load_dataset
-import transformer_lens
-from transformer_lens import HookedTransformer
-from transformer_lens import utils
+
+#gpt2
+from transformers import AutoTokenizer, AutoModel
+
+# import transformer_lens
+# from transformer_lens import HookedTransformer
+# from transformer_lens import utils
 
 from mlp import SoluMLP, GeluMLP
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
+# gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
+gpt2 = AutoModel.from_pretrained("gpt2")
+
+for name, module in gpt2.named_modules():
+    print(f"{name}: {module.__class__.__name__}")
+
 layer_to_hook = 9
 
 checkpoint_dir = "checkpoints"
@@ -34,27 +42,29 @@ solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_mo
 big_solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 gelu_layer = GeluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
 
-solu_layer.to(device)
-big_solu_layer.to(device)
-gelu_layer.to(device)
+orig = copy.deepcopy(gpt2.h[layer_to_hook].mlp) ###
 
-solu_layer.train()
-big_solu_layer.train()
-gelu_layer.train()
+models = [solu_layer, big_solu_layer, gelu_layer, orig]
+names = ["solu", "big_solu", "gelu", "orig"]
+
+for model in models:
+    model.to(device)
+    model.train()
 
 criterion = nn.MSELoss()
-s_optimizer = torch.optim.AdamW(solu_layer.parameters(), lr=2e-4)
-bs_optimizer = torch.optim.AdamW(big_solu_layer.parameters(), lr=2e-4)
-g_optimizer = torch.optim.AdamW(gelu_layer.parameters(), lr=2e-4)
+optimisers = [torch.optim.AdamW(m.parameters(), lr=2e-4) for m in models]
 
 writer = SummaryWriter()
 
 class PrePostActivationDataset(Dataset):
-    def __init__(self, pre_activations_path, post_activations_path):
+    def __init__(self, pre_activations_path, post_activations_path, add_random=False):
         self.pre_activations = np.load(pre_activations_path)
         self.post_activations = np.load(post_activations_path)
+        self.add_random = add_random
 
     def __len__(self):
+        if self.add_random:
+            return len(self.pre_activations) * 2
         return len(self.pre_activations)
 
     def __getitem__(self, idx):
@@ -71,87 +81,57 @@ dataset = PrePostActivationDataset(pre_activations_path, post_activations_path)
 data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
 val_dataset = PrePostActivationDataset(val_pre_activations_path, val_post_activations_path)
 val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
+
 for epoch in range(1000):
-    s_loss_total = 0
-    bs_loss_total = 0
-    g_loss_total = 0
+    loss_totals = [0 for _ in models]
 
     for idx, (pre_batch, post_batch) in enumerate(data_loader):
-        s_optimizer.zero_grad()
-        bs_optimizer.zero_grad()
-        g_optimizer.zero_grad()
-
+        # flatten batch
+        pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
+        post_batch = post_batch.view(-1, post_batch.shape[-1])
         pre_batch = pre_batch.to(device)
         post_batch = post_batch.to(device)
 
-        s_loss = criterion(solu_layer(pre_batch), post_batch)
-        bs_loss = criterion(big_solu_layer(pre_batch), post_batch)
-        g_loss = criterion(gelu_layer(pre_batch), post_batch)
+        for idx, (model, optimizer) in enumerate(zip(models, optimisers)):
+            optimizer.zero_grad()
+            res = model(pre_batch)
+            loss = criterion(res, post_batch)
+            loss.backward()
+            optimizer.step()
+            loss_totals[idx] += loss.item()
 
-        s_loss.backward()
-        bs_loss.backward()
-        g_loss.backward()
+    for idx, name in enumerate(names):
+        writer.add_scalar(f"Loss/{name}", loss_totals[idx] / len(data_loader), epoch)
+    
+    # evaluate
+    for model in models:
+        model.eval()
 
-        s_optimizer.step()
-        bs_optimizer.step()
-        g_optimizer.step()
-
-        s_loss_total += s_loss.item()
-        bs_loss_total += bs_loss.item()
-        g_loss_total += g_loss.item()
-
-        if idx % 10 == 0:
-            # log to tensorboard
-            writer.add_scalar("Loss/S", s_loss.item(), epoch * len(data_loader) + idx)
-            writer.add_scalar("Loss/G", g_loss.item(), epoch * len(data_loader) + idx)
-            writer.add_scalar("Loss/BS", bs_loss.item(), epoch * len(data_loader) + idx)
-
-        print(f"Epoch: {epoch} step {idx}, S Loss: {s_loss}, BS Loss: {bs_loss}, G Loss: {g_loss}")
-
-    # val
-    # eval mode
-    solu_layer.eval()
-    big_solu_layer.eval()
-    gelu_layer.eval()
-
-    s_loss_total = 0
-    bs_loss_total = 0
-    g_loss_total = 0
+    val_loss_totals = [0 for _ in models]
 
     for idx, (pre_batch, post_batch) in enumerate(val_dataloader):
+        pre_batch = pre_batch.view(-1, pre_batch.shape[-1])
+        post_batch = post_batch.view(-1, post_batch.shape[-1])
         pre_batch = pre_batch.to(device)
         post_batch = post_batch.to(device)
 
         with torch.no_grad():
-            s_loss = criterion(solu_layer(pre_batch), post_batch)
-            bs_loss = criterion(big_solu_layer(pre_batch), post_batch)
-            g_loss = criterion(gelu_layer(pre_batch), post_batch)
+            for idx, model in enumerate(models):
+                loss = criterion(model(pre_batch), post_batch)
+                val_loss_totals[idx] += loss.item()
 
-        s_loss_total += s_loss.item()
-        bs_loss_total += bs_loss.item()
-        g_loss_total += g_loss.item()
-    
-    writer.add_scalar("Val Loss/S", s_loss_total / len(val_dataloader), epoch)
-    writer.add_scalar("Val Loss/G", g_loss_total / len(val_dataloader), epoch)
-    writer.add_scalar("Val Loss/BS", bs_loss_total / len(val_dataloader), epoch)
+    for idx, name in enumerate(names):
+        writer.add_scalar(f"val loss/{name}", val_loss_totals[idx] / len(val_dataloader), epoch)
 
-    
     # train mode
-    solu_layer.train()
-    big_solu_layer.train()
-    gelu_layer.train()
-
-    print(f"end Epoch: {epoch}, S Loss: {s_loss_total / len(data_loader)}, BS Loss: {bs_loss_total / len(data_loader)}, G Loss: {g_loss_total / len(data_loader)}")
+    for model in models:
+        model.train()
 
 
 layer_str = f"layer_{layer_to_hook}"
 torch.save(solu_layer.state_dict(), os.path.join(checkpoint_dir, f"solu_{layer_str}_{epoch}.pt"))
 torch.save(big_solu_layer.state_dict(), os.path.join(checkpoint_dir, f"big_solu_{layer_str}_{epoch}.pt"))
 torch.save(gelu_layer.state_dict(), os.path.join(checkpoint_dir, f"gelu_{layer_str}_{epoch}.pt"))
-
-save_modified_gpt_model(gpt2, solu_layer, layer_to_hook, epoch, mlp_name="solu")
-save_modified_gpt_model(gpt2, big_solu_layer, layer_to_hook, epoch, mlp_name="big_solu")
-save_modified_gpt_model(gpt2, gelu_layer, layer_to_hook, epoch, mlp_name="gelu")
 
 writer.close()
 
