@@ -1,5 +1,7 @@
 import os
+import math
 import copy
+
 import numpy as np
 import torch
 from torch import nn
@@ -23,24 +25,20 @@ gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
 for name, module in gpt2.named_modules():
     print(f"{name}: {module.__class__.__name__}")
 
-layer_to_hook = 9
+layer_to_hook = 0
 
 checkpoint_dir = "checkpoints"
 if not os.path.exists(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 
-def save_modified_gpt_model(model, new_layer, layer_to_replace, epoch, mlp_name):
-    model_copy = copy.deepcopy(model)
-    print(model_copy)
-    model_copy.blocks[layer_to_replace].mlp = new_layer  # pretty sure this is wrong.
-    print(model_copy)
-    model_name = f"gpt2_modified_{mlp_name}_layer_{layer_to_replace}_epoch_{epoch}.pt"
-    torch.save(model_copy.state_dict(), os.path.join(checkpoint_dir, model_name))
-
 d_model = 768
 solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
 big_solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 gelu_layer = GeluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
+# solu_high_temp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model, temp=10)
+# solu_low_temp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model, temp=0.1)
+interp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
+big_interp = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 
 # orig = copy.deepcopy(gpt2.h[layer_to_hook].mlp) ###
 orig = copy.deepcopy(gpt2.blocks[layer_to_hook].mlp) ###
@@ -49,8 +47,10 @@ print("orig: ")
 print(orig)
 
 
-models = [solu_layer, big_solu_layer, gelu_layer]#, orig]
-names = ["solu", "big_solu", "gelu"]#, "orig"]
+# models = [solu_layer, big_solu_layer, interp, big_interp]#, gelu_layer]#, orig]
+# names = ["solu", "big_solu", "interp", "big_interp"]# "gelu" ]#, "orig"]
+models = [interp, big_interp]
+names = ["interp", "big_interp"]
 
 for model in models:
     model.to(device)
@@ -68,12 +68,10 @@ class PrePostActivationDataset(Dataset):
         self.add_random = add_random
 
     def __len__(self):
-        if self.add_random:
-            return len(self.pre_activations) * 2
         return len(self.pre_activations)
 
     def __getitem__(self, idx):
-        if self.add_random and idx >= len(self.pre_activations):
+        if self.add_random and np.random.random() < 0.5:
             # generate random pre_act
             pre_act = torch.randn(self.pre_activations.shape[1:]).to(device)
             with torch.no_grad():
@@ -95,7 +93,21 @@ data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
 val_dataset = PrePostActivationDataset(val_pre_activations_path, val_post_activations_path)
 val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
 
-for epoch in range(1000):
+def alpha_schedule(ep, total_epochs=50, start_alpha=0.5, end_alpha=1.0):
+    if ep >= total_epochs:
+        return end_alpha
+    cos_inner = (math.pi * ep) / total_epochs
+    alpha = start_alpha + (end_alpha - start_alpha) * (1 - math.cos(cos_inner)) / 2
+    return alpha
+
+for epoch in range(400):
+
+    alpha = alpha_schedule(epoch)
+    for idx, (model, name) in enumerate(zip(models, names)):
+        if "interp" in name:
+            print(f"setting alpha for {name} to {alpha}")
+            model.alpha = alpha
+
     loss_totals = [0 for _ in models]
 
     for idx, (pre_batch, post_batch) in enumerate(data_loader):
@@ -112,7 +124,7 @@ for epoch in range(1000):
             loss.backward()
             optimizer.step()
             loss_totals[idx] += loss.item()
-
+        
     for idx, name in enumerate(names):
         writer.add_scalar(f"Loss/{name}", loss_totals[idx] / len(data_loader), epoch)
     
@@ -135,16 +147,16 @@ for epoch in range(1000):
 
     for idx, name in enumerate(names):
         writer.add_scalar(f"val loss/{name}", val_loss_totals[idx] / len(val_dataloader), epoch)
+    writer.add_scalar(f"alpha", alpha, epoch)
 
     # train mode
     for model in models:
         model.train()
 
-
+# save all the models
 layer_str = f"layer_{layer_to_hook}"
-torch.save(solu_layer.state_dict(), os.path.join(checkpoint_dir, f"solu_{layer_str}_{epoch}.pt"))
-torch.save(big_solu_layer.state_dict(), os.path.join(checkpoint_dir, f"big_solu_{layer_str}_{epoch}.pt"))
-torch.save(gelu_layer.state_dict(), os.path.join(checkpoint_dir, f"gelu_{layer_str}_{epoch}.pt"))
+for model, name in zip(models, names):
+    torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{name}_{layer_str}_{epoch}.pt"))
 
 writer.close()
 
