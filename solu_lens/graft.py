@@ -18,6 +18,9 @@ from transformer_lens import utils
 
 from mlp import SoluMLP, GeluMLP
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 
 layer_to_hook = 0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,8 +58,8 @@ fwd_hooks = [
 ]
 
 
-for name, module in gpt2.named_modules():
-    print(f"{name}: {module.__class__.__name__}")
+# for name, module in gpt2.named_modules():
+#     print(f"{name}: {module.__class__.__name__}")
 
 
 checkpoint_dir = "checkpoints"
@@ -67,8 +70,6 @@ d_model = 768
 solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
 big_solu_layer = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 gelu_layer = GeluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
-# solu_high_temp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model, temp=10)
-# solu_low_temp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model, temp=0.1)
 interp = SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model)
 big_interp = SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model)
 
@@ -81,8 +82,8 @@ print(orig)
 
 # models = [solu_layer, big_solu_layer, interp, big_interp]#, gelu_layer]#, orig]
 # names = ["solu", "big_solu", "interp", "big_interp"]# "gelu" ]#, "orig"]
-models = [interp, big_interp, gelu_layer, solu_layer]
-names = ["interp", "big_interp", "gelu", "solu"]
+models = [interp, big_interp, gelu_layer, solu_layer, big_solu_layer]
+names = ["interp", "big_interp", "gelu", "solu", "big_solu"]
 
 for model in models:
     model.to(device)

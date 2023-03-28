@@ -4,6 +4,9 @@ import numpy as np
 from torch.utils.data import Dataset
 
 class ToyNeuralDataset(Dataset):
+    """
+    Follows https://www.lesswrong.com/posts/z6QQJbtpkEAX3Aojj/interim-research-report-taking-features-out-of-superposition
+    """
     def __init__(self, h=256, G=512, num_samples=1000, avg_active_features=5, lambda_decay=0.99):
         self.h = h
         self.G = G
