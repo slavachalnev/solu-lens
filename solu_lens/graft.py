@@ -1,6 +1,7 @@
 import os
 import math
 import copy
+import time
 
 import numpy as np
 import torch
@@ -23,8 +24,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 gpt2 = HookedTransformer.from_pretrained("gpt2-small", device=device)
 layernorm = copy.deepcopy(gpt2.blocks[layer_to_hook].ln2)
 
-data_loader = transformer_lens.evals.make_pile_data_loader(tokenizer=gpt2.tokenizer, batch_size=8)
-val_loader = transformer_lens.evals.make_owt_data_loader(tokenizer=gpt2.tokenizer, batch_size=8)
+def big_owt_data_loader(tokenizer, batch_size=8):
+    data = load_dataset("openwebtext", split="train[:10%]")
+    print("data len", len(data))
+    dataset = utils.tokenize_and_concatenate(data, tokenizer)
+    data_loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+    )
+    return data_loader
+
+data_loader = big_owt_data_loader(tokenizer=gpt2.tokenizer, batch_size=8)
+val_loader = transformer_lens.evals.make_pile_data_loader(tokenizer=gpt2.tokenizer, batch_size=8)
 
 h_pre = None
 h_post = None
@@ -110,8 +120,9 @@ for idx, (model, name) in enumerate(zip(models, names)):
         model.alpha = alpha
 
 global_step = 0
-for epoch in range(100):
+for epoch in range(10):
     loss_totals = [0 for _ in models]
+    t0 = time.time()
 
     for bidx, batch in enumerate(data_loader):
         global_step += 1
@@ -121,6 +132,7 @@ for epoch in range(100):
             for idx, (model, name) in enumerate(zip(models, names)):
                 if "interp" in name:
                     print(f"setting alpha for {name} to {alpha}")
+                    writer.add_scalar(f"alpha", alpha, global_step)
                     model.alpha = alpha
 
         pre_batch, post_batch = get_pre_post(batch)
@@ -134,31 +146,36 @@ for epoch in range(100):
             loss_totals[idx] += loss.item()
 
             if bidx % 100 == 0:
+                if idx == 0:
+                    print('took', time.time() - t0)
+                    t0 = time.time()
+
                 print(f"Epoch {epoch}, batch {bidx}, {names[idx]} loss: {loss.item()}")
                 writer.add_scalar(f"Loss/{names[idx]}", loss.item(), epoch * len(data_loader) + bidx)
     
-    # evaluate
-    for model in models:
-        model.eval()
+        if bidx % 1000 == 0:
+            # evaluate
+            for model in models:
+                model.eval()
 
-    val_loss_totals = [0 for _ in models]
+            val_loss_totals = [0 for _ in models]
 
-    for idx, batch in enumerate(val_loader):
-        pre_batch, post_batch = get_pre_post(batch)
+            for idx, batch in enumerate(val_loader):
+                pre_batch, post_batch = get_pre_post(batch)
 
-        with torch.no_grad():
-            for idx, model in enumerate(models):
-                loss = criterion(model(pre_batch), post_batch)
-                val_loss_totals[idx] += loss.item()
-        if idx == 100:
-            break
+                with torch.no_grad():
+                    for idx, model in enumerate(models):
+                        loss = criterion(model(pre_batch), post_batch)
+                        val_loss_totals[idx] += loss.item()
+                if idx == 100:
+                    break
 
-    for i, name in enumerate(names):
-        writer.add_scalar(f"val loss/{name}", val_loss_totals[i] / len(val_loader), epoch)
+            for i, name in enumerate(names):
+                writer.add_scalar(f"val loss/{name}", val_loss_totals[i] / len(val_loader), epoch * len(data_loader) + bidx)
 
-    # train mode
-    for model in models:
-        model.train()
+            # train mode
+            for model in models:
+                model.train()
 
 # save all the models
 layer_str = f"layer_{layer_to_hook}"
