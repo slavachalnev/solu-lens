@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as functional
 import numpy as np
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 
 class ToyFeatureDataset(Dataset):
     """
@@ -66,18 +66,13 @@ class ToyFeatureDataset(Dataset):
         return sample, activations
     
 
-class ReProjectorDataset(Dataset):
-    # TODO: this should probably be a generator
-
-    def __init__(self, d=64, G=512, num_samples=1000):
+class ReProjectorDataset(IterableDataset):
+    def __init__(self, d=64, G=512):
         """
         args:
             d: number of dimensions
             G: number of ground truth features
-            num_samples: number of samples in the dataset
         """
-        self.num_samples = num_samples
-        
         # project the ground truth features into a lower dimensional space
         self.proj = torch.randn(G, d)
         self.target_proj = torch.randn(G, d)
@@ -85,33 +80,24 @@ class ReProjectorDataset(Dataset):
         # probability of a feature being active by zipf's law
         self.probs = torch.tensor([(i+1)**(-1.1) for i in range(G)])
         self.probs = self.probs / self.probs.sum()
-    
-    def __len__(self):
-        return self.num_samples
-    
-    def __getitem__(self, idx):
-        # Sample G-dimensional binary random variable using the precomputed probabilities
-        binary_rv = torch.distributions.Bernoulli(self.probs).sample()
 
-        # project to lower dimension
-        sample = binary_rv @ self.proj
+    def __iter__(self):
+        while True:
+            # Sample G-dimensional binary random variable using the precomputed probabilities
+            binary_rv = torch.distributions.Bernoulli(self.probs).sample()
 
-        # project to target
-        target = binary_rv @ self.target_proj
+            # project to lower dimension
+            sample = binary_rv @ self.proj
 
-        return sample, target
+            # project to target
+            target = binary_rv @ self.target_proj
+
+            yield sample, target
 
 
 if __name__ == '__main__':
     dataset = ReProjectorDataset()
     # data_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
-
-    # for sample, activations in data_loader:
-    #     print(sample.shape, activations.shape)
-    #     print('sample', sample[:10])
-    #     print('activations', activations[:10])
-    #     break
-
 
 
 
