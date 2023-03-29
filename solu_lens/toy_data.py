@@ -3,11 +3,20 @@ import torch.nn.functional as functional
 import numpy as np
 from torch.utils.data import Dataset
 
-class ToyNeuralDataset(Dataset):
+class ToyFeatureDataset(Dataset):
     """
     Follows https://www.lesswrong.com/posts/z6QQJbtpkEAX3Aojj/interim-research-report-taking-features-out-of-superposition
     """
     def __init__(self, h=256, G=512, num_samples=1000, avg_active_features=5, lambda_decay=0.99):
+        """
+        args:
+            h: number of hidden units
+            G: number of ground truth features
+            num_samples: number of samples in the dataset
+            avg_active_features: average number of active features per sample
+            lambda_decay: decay rate. Early features are more active than later features
+        """
+
         self.h = h
         self.G = G
         self.num_samples = num_samples
@@ -55,13 +64,64 @@ class ToyNeuralDataset(Dataset):
         sample = torch.mv(self.F, activations)
 
         return sample, activations
+    
 
-# Usage
-dataset = ToyNeuralDataset()
-data_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+class ReProjectorDataset(Dataset):
+    # TODO: this should probably be a generator
 
-for sample, activations in data_loader:
-    print(sample.shape, activations.shape)
-    print('sample', sample[:10])
-    print('activations', activations[:10])
-    break
+    def __init__(self, d=64, G=512, num_samples=1000):
+        """
+        args:
+            d: number of dimensions
+            G: number of ground truth features
+            num_samples: number of samples in the dataset
+        """
+        self.num_samples = num_samples
+        
+        # project the ground truth features into a lower dimensional space
+        self.proj = torch.randn(G, d)
+        self.target_proj = torch.randn(G, d)
+
+        # probability of a feature being active by zipf's law
+        self.probs = torch.tensor([(i+1)**(-1.1) for i in range(G)])
+        self.probs = self.probs / self.probs.sum()
+    
+    def __len__(self):
+        return self.num_samples
+    
+    def __getitem__(self, idx):
+        # Sample G-dimensional binary random variable using the precomputed probabilities
+        binary_rv = torch.distributions.Bernoulli(self.probs).sample()
+
+        # project to lower dimension
+        sample = binary_rv @ self.proj
+
+        # project to target
+        target = binary_rv @ self.target_proj
+
+        return sample, target
+
+
+if __name__ == '__main__':
+    dataset = ReProjectorDataset()
+    # data_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    # for sample, activations in data_loader:
+    #     print(sample.shape, activations.shape)
+    #     print('sample', sample[:10])
+    #     print('activations', activations[:10])
+    #     break
+
+
+
+
+# if __name__ == '__main__':
+    # # Usage
+    # dataset = ToyFeatureDataset()
+    # data_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    # for sample, activations in data_loader:
+    #     print(sample.shape, activations.shape)
+    #     print('sample', sample[:10])
+    #     print('activations', activations[:10])
+    #     break
