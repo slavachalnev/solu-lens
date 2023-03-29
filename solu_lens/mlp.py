@@ -29,9 +29,17 @@ class SoluMLP(nn.Module):
         self.temperature = temp
         self.alpha = alpha
     
-    def forward(self, x):
+    def forward(self, x, return_activations=False):
+        """
+        args:
+            return_activations: if True, only return the activations of the first layer.
+        """
         x = self.fc1(x)
         x = self.activation(x, temperature=self.temperature, alpha=self.alpha)
+
+        if return_activations:
+            return x
+
         if self.norm:
             x = self.layer_norm(x)
         x = self.fc2(x)
@@ -47,9 +55,17 @@ class GeluMLP(nn.Module):
         self.fc2 = nn.Linear(hidden_size, output_size)
         self.activation = nn.GELU()
     
-    def forward(self, x):
+    def forward(self, x, return_activations=False):
+        """
+        args:
+            return_activations: if True, only return the activations of the first layer.
+        """
         x = self.fc1(x)
         x = self.activation(x)
+
+        if return_activations:
+            return x
+
         x = self.fc2(x)
         return x
     
