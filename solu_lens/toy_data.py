@@ -67,19 +67,20 @@ class ToyFeatureDataset(Dataset):
     
 
 class ReProjectorDataset(IterableDataset):
-    def __init__(self, d=64, G=512):
+    def __init__(self, d=64, G=512, device='cpu'):
         """
         args:
             d: number of dimensions
             G: number of ground truth features
         """
         # project the ground truth features into a lower dimensional space
-        self.proj = torch.randn(G, d)
-        self.target_proj = torch.randn(G, d)
+        self.proj = torch.randn(G, d).to(device)
+        self.target_proj = torch.randn(G, d).to(device)
 
         # probability of a feature being active by zipf's law
         self.probs = torch.tensor([(i+1)**(-1.1) for i in range(G)])
         self.probs = self.probs / self.probs.sum()
+        self.probs = self.probs.to(device)
 
     def __iter__(self):
         while True:
@@ -93,6 +94,18 @@ class ReProjectorDataset(IterableDataset):
             target = binary_rv @ self.target_proj
 
             yield sample, target
+    
+    def get_batch(self, batch_size):
+        binary_rv = torch.distributions.Bernoulli(self.probs).sample((batch_size,))
+        # binary_rv.shape is (batch_size, G)
+
+        # project to lower dimension
+        sample = binary_rv @ self.proj
+
+        # project to target
+        target = binary_rv @ self.target_proj
+
+        return sample, target
 
 
 if __name__ == '__main__':
