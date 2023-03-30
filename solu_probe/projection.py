@@ -1,9 +1,14 @@
 import numpy as np
+import time
+import os
+import random
 
 import torch
 from torch import nn
 from torch.utils.data import Dataset, IterableDataset
 from torch.utils.tensorboard import SummaryWriter
+
+import torch.cuda.amp as amp
 
 from toy_data import ReProjectorDataset
 from mlp import GeluMLP, SoluMLP
@@ -30,6 +35,8 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
     projection_matrix: np array that projects G -> d.
     norm: nn.LayerNorm(d)
     """
+    t0 = time.time()
+    projection_matrix = projection_matrix.to(torch.float32)
     dataset = OneHotDataset(projection_matrix)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=32)
 
@@ -56,6 +63,7 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
         sum_activations += torch.sum(clipped_activations, dim=0)
     
     monosemanticity = max_activations / (sum_activations + 1e-10)
+    print('measuring monosemanticity took', time.time() - t0, 'seconds.')
 
     return monosemanticity
 
@@ -66,8 +74,8 @@ def train(model,
           name,
           layernorm=None,
           target_model=None,
-          num_steps=2000000,
-          batch_size=16384,
+          num_steps=100000,
+          batch_size=65536,
           learning_rate=5e-3,
           device="cpu",
           ):
@@ -89,27 +97,43 @@ def train(model,
 
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    scaler = amp.GradScaler()
+
+    t0 = time.time()
 
     for batch_idx in range(num_steps):
+        # t0 = time.time()
         sample, target = dataset.get_batch(batch_size)
+        # t1 = time.time()
+        # print('getting batch took \t', t1 - t0, 'seconds.')
+
         sample = sample.to(device)
 
         if target_model is not None:
             with torch.no_grad():
-                sample = layernorm(sample)
-                target = target_model(sample)
+                with amp.autocast():
+                    sample = layernorm(sample)
+                    target = target_model(sample)
         else:
             target = target.to(device)
 
         optimizer.zero_grad()
-        output = model(sample)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
-
+        with amp.autocast():
+            output = model(sample)
+            loss = criterion(output, target)
+        # t2 = time.time()
+        # print('forward pass took \t', t2 - t1, 'seconds.')
+        scaler.scale(loss).backward()
+        # t3 = time.time()
+        # print('backward took \t\t', t3 - t2, 'seconds.')
+        scaler.step(optimizer)
+        scaler.update()
+        
         if batch_idx % 1000 == 0:
             print(f"batch_idx: {batch_idx}, loss: {loss.item()}")
             writer.add_scalar(f"Loss/{name}", loss.item(), batch_idx)
+            print('training took \t\t', time.time() - t0, 'seconds.')
+            t0 = time.time()
         
         if batch_idx % 10000 == 0:
             if target_model is None:
@@ -128,7 +152,12 @@ def train(model,
             break
 
 
-def main():
+def main(run_num, name):
+    # TODO: log all parameters to file
+
+    out_dir = os.path.join("projection_out", name, str(run_num))
+    os.makedirs(out_dir)
+
     d = 64
     G = 512
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -137,45 +166,47 @@ def main():
     # save projection matrices
     proj = dataset.proj.cpu().numpy()
     target_proj = dataset.target_proj.cpu().numpy()
-    np.save("projection_out/proj.npy", proj)
-    np.save("projection_out/target_proj.npy", target_proj)
+    np.save(f"{out_dir}/proj.npy", proj)
+    np.save(f"{out_dir}/target_proj.npy", target_proj)
 
     layernorm = nn.LayerNorm(d)
     gelu_mlp = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
     sequential_mlp = nn.Sequential(layernorm, gelu_mlp)
 
-    writer = SummaryWriter()
+    writer = SummaryWriter(log_dir=f"runs/{name}_{run_num}")
 
     train(model=sequential_mlp, dataset=dataset, writer=writer, name="original_gelu", device=device)
 
     # save the models
-    torch.save(layernorm.state_dict(), "projection_out/layernorm.pt")
-    torch.save(gelu_mlp.state_dict(), "projection_out/gelu_mlp.pt")
+    torch.save(layernorm.state_dict(), f"{out_dir}/layernorm.pt")
+    torch.save(gelu_mlp.state_dict(), f"{out_dir}/gelu_mlp.pt")
 
     ### graft ###
     
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
-    torch.save(model.state_dict(), "projection_out/graft_solu.pt")
+    torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
 
     model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_big_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
-    torch.save(model.state_dict(), "projection_out/graft_big_solu.pt")
+    torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
-    torch.save(model.state_dict(), "projection_out/graft_gelu.pt")
+    torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_big_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
-    torch.save(model.state_dict(), "projection_out/graft_big_gelu.pt")
+    torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
 
     writer.close()
 
 
 if __name__ == "__main__":
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    # generate random name
+    run_name = str(random.randint(0, 1000000))
 
-    main()
+    main(run_num=0, name=run_name)
+    main(run_num=1, name=run_name)
+    main(run_num=2, name=run_name)
     print("done")
