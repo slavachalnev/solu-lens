@@ -17,7 +17,7 @@ class OneHotDataset(Dataset):
         return self.proj.shape[0]
 
     def __getitem__(self, idx):
-        sample = torch.zeros(self.proj.shape[0])
+        sample = torch.zeros(self.proj.shape[0], device=self.proj.device)
         sample[idx] = 1
 
         return sample @ self.proj, idx
@@ -58,16 +58,80 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
     monosemanticity = max_activations / (sum_activations + 1e-10)
 
     return monosemanticity
-    
 
-def train_mlps(d, G, num_steps_train=1000, num_steps_graft=1000, batch_size=1024, learning_rate=1e-3, device="cpu"):
-    """
-    # step 1. train a gelu mlp on sample -> target.
-    # step 2. train a solu mlp on sample -> gelu_mlp(sample)
-    """
+
+def train(model,
+          dataset,
+          writer,
+          name,
+          layernorm=None,
+          target_model=None,
+          num_steps=100000,
+          batch_size=1024,
+          learning_rate=1e-3,
+          device="cpu",
+          ):
+
+    model.to(device)
+    model.train()
+
+    if target_model is not None:
+        # if we have a target model, we need to normalize the input.
+        # if we don't have a target model, assume layernorm is part of the model.
+        assert layernorm is not None
+        target_model.to(device)
+        target_model.eval()
+        layernorm.to(device)
+        layernorm.eval()
+    else:
+        assert layernorm is None
+        assert isinstance(model, nn.Sequential)
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+    for batch_idx in range(num_steps):
+        sample, target = dataset.get_batch(batch_size)
+        sample = sample.to(device)
+
+        if target_model is not None:
+            with torch.no_grad():
+                sample = layernorm(sample)
+                target = target_model(sample)
+        else:
+            target = target.to(device)
+
+        optimizer.zero_grad()
+        output = model(sample)
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+
+        if batch_idx % 1000 == 0:
+            print(f"batch_idx: {batch_idx}, loss: {loss.item()}")
+            writer.add_scalar(f"Loss/{name}", loss.item(), batch_idx)
+        
+        if batch_idx % 10000 == 0:
+            if target_model is None:
+                monosemanticity = measure_monosemanticity(model[1], dataset.proj, model[0], device=device)
+            else:
+                monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device=device)
+
+            writer.add_scalar(f"Monosemanticity/{name}", monosemanticity.mean().item(), batch_idx)
+            writer.add_scalar(f"Monosemanticity/{name}_max", monosemanticity.max().item(), batch_idx)
+            np_mono = monosemanticity.cpu().numpy()
+            np_mono = np.asarray(sorted(np_mono))
+            writer.add_scalar(f"Monosemanticity/{name}_mean_top", np_mono[-100:].mean(), batch_idx)
+        
+        if batch_idx >= num_steps:
+            break
+
+
+def main():
+    d = 64
+    G = 1024
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = ReProjectorDataset(d=d, G=G, device=device)
-
-    writer = SummaryWriter()
 
     # save projection matrices
     proj = dataset.proj.cpu().numpy()
@@ -75,82 +139,21 @@ def train_mlps(d, G, num_steps_train=1000, num_steps_graft=1000, batch_size=1024
     np.save("projection_out/proj.npy", proj)
     np.save("projection_out/target_proj.npy", target_proj)
 
-
     layernorm = nn.LayerNorm(d)
     gelu_mlp = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    sequential_mlp = nn.Sequential(layernorm, gelu_mlp)
 
-    mlp = nn.Sequential(layernorm, gelu_mlp)
-    mlp.to(device)
-    mlp.train()
+    writer = SummaryWriter()
 
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(mlp.parameters(), lr=learning_rate)
-
-    for batch_idx in range(num_steps_train):
-        # faster than using a dataloader
-        sample, target = dataset.get_batch(batch_size=batch_size)
-
-        optimizer.zero_grad()
-        output = mlp(sample)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
-
-        if batch_idx % 1000 == 0:
-            print(f"batch {batch_idx}, loss {loss.item()}")
-            writer.add_scalar("Loss/gelu_mlp_train", loss.item(), batch_idx)
-        
-        if batch_idx % 10000 == 0:
-            # measure monosemanticity
-            monosemanticity = measure_monosemanticity(gelu_mlp, proj, layernorm, device=device)
-            writer.add_scalar("Monosemanticity/gelu_mlp_train", monosemanticity.mean().item(), batch_idx)
-            writer.add_scalar("Monosemanticity/gelu_mlp_train_max", monosemanticity.max().item(), batch_idx)
-            np_mono = monosemanticity.cpu().numpy()
-            np_mono = np.asarray(sorted(np_mono))
-            writer.add_scalar("Monosemanticity/gelu_mlp_train_mean_top", np_mono[-100:].mean(), batch_idx)
-
-        if batch_idx >= num_steps_train:
-            break
+    train(model=sequential_mlp, dataset=dataset, writer=writer, name="original_gelu", device=device)
 
     # save the models
     torch.save(layernorm.state_dict(), "projection_out/layernorm.pt")
     torch.save(gelu_mlp.state_dict(), "projection_out/gelu_mlp.pt")
 
     solu_mlp = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    solu_mlp.to(device)
-    solu_mlp.train()
 
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(solu_mlp.parameters(), lr=learning_rate)
-
-    for batch_idx in range(num_steps_graft):
-        sample, target = dataset.get_batch(batch_size=batch_size)
-
-        optimizer.zero_grad()
-
-        normed_sample = layernorm(sample)
-        gelu_output = gelu_mlp(normed_sample)
-        solu_output = solu_mlp(normed_sample)
-
-        loss = criterion(solu_output, gelu_output)
-        loss.backward()
-        optimizer.step()
-
-        if batch_idx % 1000 == 0:
-            print(f"batch {batch_idx}, loss {loss.item()}")
-            writer.add_scalar("Loss/solu_mlp_train", loss.item(), batch_idx)
-
-        if batch_idx % 10000 == 0:
-            # measure monosemanticity
-            monosemanticity = measure_monosemanticity(solu_mlp, proj, layernorm, device=device)
-            writer.add_scalar("Monosemanticity/solu_mlp_train", monosemanticity.mean().item(), batch_idx)
-            writer.add_scalar("Monosemanticity/solu_mlp_train_max", monosemanticity.max().item(), batch_idx)
-            np_mono = monosemanticity.cpu().numpy()
-            np_mono = np.asarray(sorted(np_mono))
-            writer.add_scalar("Monosemanticity/solu_mlp_train_mean_top", np_mono[-100:].mean(), batch_idx)
-
-        if batch_idx >= num_steps_graft:
-            break
+    train(model=solu_mlp, dataset=dataset, writer=writer, name="solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
 
     # save the model
     torch.save(solu_mlp.state_dict(), "projection_out/solu_mlp.pt")
@@ -158,44 +161,6 @@ def train_mlps(d, G, num_steps_train=1000, num_steps_graft=1000, batch_size=1024
     writer.close()
 
 
+
 if __name__ == "__main__":
-    d = 64
-    G = 1024
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    train_mlps(d, G, num_steps_train=500000, num_steps_graft=1000000, device=device)
-
-    # load the models
-    layernorm = nn.LayerNorm(d)
-    layernorm.load_state_dict(torch.load("projection_out/layernorm.pt"))
-    layernorm.to(device)
-    layernorm.eval()
-
-    gelu_mlp = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    gelu_mlp.load_state_dict(torch.load("projection_out/gelu_mlp.pt"))
-    gelu_mlp.to(device)
-    gelu_mlp.eval()
-
-    solu_mlp = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    solu_mlp.load_state_dict(torch.load("projection_out/solu_mlp.pt"))
-    solu_mlp.to(device)
-    solu_mlp.eval()
-
-
-    # load the projection matrices
-    proj = np.load("projection_out/proj.npy")
-    target_proj = np.load("projection_out/target_proj.npy")
-
-    # measure monosemanticity
-    monosemanticity = measure_monosemanticity(solu_mlp, proj, layernorm, device=device)
-    print('monosemanticity of solu mlp')
-    print(f"monosemanticity: {monosemanticity}")
-    print(f"mean monosemanticity: {torch.mean(monosemanticity)}")
-    print(f"max monosemanticity: {torch.max(monosemanticity)}")
-
-    monosemanticity = measure_monosemanticity(gelu_mlp, proj, layernorm, device=device)
-    print('monosemanticity of gelu mlp')
-    print(f"monosemanticity: {monosemanticity}")
-    print(f"mean monosemanticity: {torch.mean(monosemanticity)}")
-    print(f"max monosemanticity: {torch.max(monosemanticity)}")
-
+    main()
