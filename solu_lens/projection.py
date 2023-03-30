@@ -66,9 +66,9 @@ def train(model,
           name,
           layernorm=None,
           target_model=None,
-          num_steps=100000,
-          batch_size=1024,
-          learning_rate=1e-3,
+          num_steps=2000000,
+          batch_size=16384,
+          learning_rate=5e-3,
           device="cpu",
           ):
 
@@ -122,6 +122,7 @@ def train(model,
             np_mono = monosemanticity.cpu().numpy()
             np_mono = np.asarray(sorted(np_mono))
             writer.add_scalar(f"Monosemanticity/{name}_mean_top", np_mono[-100:].mean(), batch_idx)
+            writer.add_scalar(f"Monosemanticity/{name}_num_mono", np.count_nonzero(np_mono > 0.9), batch_idx)
         
         if batch_idx >= num_steps:
             break
@@ -129,7 +130,7 @@ def train(model,
 
 def main():
     d = 64
-    G = 1024
+    G = 512
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = ReProjectorDataset(d=d, G=G, device=device)
 
@@ -151,16 +152,30 @@ def main():
     torch.save(layernorm.state_dict(), "projection_out/layernorm.pt")
     torch.save(gelu_mlp.state_dict(), "projection_out/gelu_mlp.pt")
 
-    solu_mlp = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    ### graft ###
+    
+    model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    torch.save(model.state_dict(), "projection_out/graft_solu.pt")
 
-    train(model=solu_mlp, dataset=dataset, writer=writer, name="solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    train(model=model, dataset=dataset, writer=writer, name="graft_big_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    torch.save(model.state_dict(), "projection_out/graft_big_solu.pt")
 
-    # save the model
-    torch.save(solu_mlp.state_dict(), "projection_out/solu_mlp.pt")
+    model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    train(model=model, dataset=dataset, writer=writer, name="graft_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    torch.save(model.state_dict(), "projection_out/graft_gelu.pt")
+
+    model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    train(model=model, dataset=dataset, writer=writer, name="graft_big_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    torch.save(model.state_dict(), "projection_out/graft_big_gelu.pt")
 
     writer.close()
 
 
-
 if __name__ == "__main__":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
     main()
+    print("done")
