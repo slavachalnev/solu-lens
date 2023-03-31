@@ -67,15 +67,24 @@ class ToyFeatureDataset(Dataset):
     
 
 class ReProjectorDataset(IterableDataset):
-    def __init__(self, d=64, G=512, device='cpu', dtype=torch.float16):
+    def __init__(self, d=64, G=512, device='cpu', dtype=torch.float16, proj=None, target_proj=None):
         """
         args:
             d: number of dimensions
             G: number of ground truth features
+            proj: np projection matrix. If None, randomly initialized.
+            target_proj: np projection matrix. If None, randomly initialized.
         """
         # project the ground truth features into a lower dimensional space
-        self.proj = torch.randn(G, d).to(device).to(dtype)
-        self.target_proj = torch.randn(G, d).to(device).to(dtype)
+        if proj is None:
+            self.proj = torch.randn(G, d).to(device).to(dtype)
+        else:
+            self.proj = torch.tensor(proj).to(device).to(dtype)
+
+        if target_proj is None:
+            self.target_proj = torch.randn(G, d).to(device).to(dtype)
+        else:
+            self.target_proj = torch.tensor(target_proj).to(device).to(dtype)
 
         # probability of a feature being active by zipf's law
         self.probs = torch.tensor([(i+1)**(-1.1) for i in range(G)]).to(dtype)

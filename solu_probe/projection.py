@@ -63,8 +63,6 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
         sum_activations += torch.sum(clipped_activations, dim=0)
     
     monosemanticity = max_activations / (sum_activations + 1e-10)
-    print('measuring monosemanticity took', time.time() - t0, 'seconds.')
-
     return monosemanticity
 
 
@@ -74,7 +72,7 @@ def train(model,
           name,
           layernorm=None,
           target_model=None,
-          num_steps=100000,
+          num_steps=1000000,
           batch_size=65536,
           learning_rate=5e-3,
           device="cpu",
@@ -152,6 +150,53 @@ def train(model,
             break
 
 
+def do_analysis(checkpoint_dir):
+    # build dataset
+    proj = np.load(f"{checkpoint_dir}/proj.npy")
+    target_proj = np.load(f"{checkpoint_dir}/target_proj.npy")
+    G, d = proj.shape
+
+    dataset = ReProjectorDataset(d=d, G=G, device="cpu", proj=proj, target_proj=target_proj)
+
+    # load layernorm
+    layernorm = nn.LayerNorm(d)
+    layernorm.load_state_dict(torch.load(f"{checkpoint_dir}/layernorm.pt", map_location="cpu"))
+
+    # load and analyse models
+    model_names = [f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")]
+    model_names = [f for f in model_names if "layernorm" not in f]
+    model_names = [os.path.splitext(f)[0] for f in model_names] # remove .pt
+
+    for model_name in model_names:
+        model_dict = torch.load(f"{checkpoint_dir}/{model_name}.pt", map_location="cpu")
+
+        if model_name in ['gelu_mlp', 'graft_gelu']:
+            model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+        elif model_name in ['graft_big_gelu']:
+            model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
+        elif model_name in ['graft_solu']:
+            model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
+        elif model_name in ['graft_big_solu']:
+            model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
+        else:
+            raise ValueError(f"unknown model name {model_name}")
+        
+        model.load_state_dict(model_dict)
+        analyse_model(model, model_name, dataset, layernorm)
+
+
+def analyse_model(model, name, dataset, layernorm):
+    print()
+    print('analyzing', name)
+    monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu")
+    print('monosemanticity', monosemanticity.mean().item())
+    print('monosemanticity max', monosemanticity.max().item())
+    np_mono = monosemanticity.cpu().numpy()
+    np_mono = np.asarray(sorted(np_mono))
+    print('monosemanticity mean top 100', np_mono[-100:].mean())
+    print()
+
+
 def main(run_num, name):
     # TODO: log all parameters to file
 
@@ -203,10 +248,12 @@ def main(run_num, name):
 
 
 if __name__ == "__main__":
-    # generate random name
-    run_name = str(random.randint(0, 1000000))
+    # # generate random name
+    # run_name = str(random.randint(0, 1000000))
 
-    main(run_num=0, name=run_name)
-    main(run_num=1, name=run_name)
-    main(run_num=2, name=run_name)
-    print("done")
+    # main(run_num=0, name=run_name)
+    # main(run_num=1, name=run_name)
+    # main(run_num=2, name=run_name)
+    # print("done")
+
+    do_analysis("projection_out")
