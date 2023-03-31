@@ -29,9 +29,8 @@ class OneHotDataset(Dataset):
         return sample @ self.proj, idx
 
 
-
 @torch.no_grad()
-def measure_monosemanticity(model, projection_matrix, norm, plot=False, device="cpu"):
+def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir=None, device="cpu"):
     """
     model: a d -> h -> d mlp.
     projection_matrix: np array that projects G -> d.
@@ -65,8 +64,15 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, device="
     monosemanticity = max_activations / (sum_activations + 1e-10)
 
     if plot:
+        # os.makedirs(plot_dir, exist_ok=True)
+
+        # Sort neurons by monosemanticity
         sorted_neurons = torch.argsort(monosemanticity, descending=True)
-        sorted_features = torch.argsort(torch.max(activations_all, dim=1).values, descending=True)
+
+        # Sort features as https://arxiv.org/pdf/2211.09169.pdf.
+        activations_sorted_neurons = activations_all[:, sorted_neurons]
+        most_activated_neurons = torch.argmax(activations_sorted_neurons, dim=1)
+        sorted_features = torch.argsort(most_activated_neurons)
 
         activations_sorted = activations_all[sorted_features, :][:, sorted_neurons].cpu().numpy()
 
@@ -75,7 +81,8 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, device="
         rescaled_activations_sorted = activations_sorted / (max_activations_sorted + 1e-10)
         rescaled_activations_sorted = rescaled_activations_sorted.T
 
-        plt.figure()
+        max_n = max(num_features, num_neurons)
+        plt.figure(figsize=(7*num_features / max_n, 7*num_neurons / max_n))
         plt.imshow(rescaled_activations_sorted, aspect='auto', cmap='viridis')
         plt.xlabel('Features')
         plt.ylabel('Neurons')
@@ -223,8 +230,10 @@ def main(run_num, name):
     out_dir = os.path.join("projection_out", name, str(run_num))
     os.makedirs(out_dir)
 
-    d = 64
-    G = 512
+    # d = 64
+    # G = 512
+    d = 32
+    G = 256
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = ReProjectorDataset(d=d, G=G, device=device)
 
@@ -240,28 +249,29 @@ def main(run_num, name):
 
     writer = SummaryWriter(log_dir=f"runs/{name}_{run_num}")
 
-    train(model=sequential_mlp, dataset=dataset, writer=writer, name="original_gelu", device=device)
+    train(model=sequential_mlp, dataset=dataset, writer=writer, name="original_gelu", device=device, num_steps=1000000)
 
     # save the models
     torch.save(layernorm.state_dict(), f"{out_dir}/layernorm.pt")
     torch.save(gelu_mlp.state_dict(), f"{out_dir}/gelu_mlp.pt")
 
     ### graft ###
+    graft_steps = 5000000
     
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
     torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
 
     model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_big_solu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    train(model=model, dataset=dataset, writer=writer, name="graft_big_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    train(model=model, dataset=dataset, writer=writer, name="graft_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
     torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_big_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device)
+    train(model=model, dataset=dataset, writer=writer, name="graft_big_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
 
     writer.close()
@@ -279,6 +289,6 @@ if __name__ == "__main__":
     print("=======")
     do_analysis("projection_out/964786/0")
     print("=======")
-    do_analysis("projection_out/964786/1")
-    print("=======")
+    # do_analysis("projection_out/964786/1")
+    # print("=======")
     # do_analysis("projection_out/964786/2")
