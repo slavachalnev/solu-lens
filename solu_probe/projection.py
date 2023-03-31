@@ -256,7 +256,7 @@ def main(run_num, name):
     torch.save(gelu_mlp.state_dict(), f"{out_dir}/gelu_mlp.pt")
 
     ### graft ###
-    graft_steps = 5000000
+    graft_steps = 3000000
     
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
@@ -278,17 +278,17 @@ def main(run_num, name):
 
 
 if __name__ == "__main__":
-    # # generate random name
-    # run_name = str(random.randint(0, 1000000))
+    # generate random name
+    run_name = str(random.randint(0, 1000000))
 
-    # main(run_num=0, name=run_name)
-    # main(run_num=1, name=run_name)
-    # main(run_num=2, name=run_name)
-    # print("done")
+    main(run_num=0, name=run_name)
+    main(run_num=1, name=run_name)
+    main(run_num=2, name=run_name)
+    print("done")
     
-    print("=======")
-    do_analysis("projection_out/964786/0")
-    print("=======")
+    # print("=======")
+    # do_analysis("projection_out/964786/0")
+    # print("=======")
     # do_analysis("projection_out/964786/1")
     # print("=======")
     # do_analysis("projection_out/964786/2")
