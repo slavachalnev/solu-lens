@@ -3,11 +3,12 @@ import time
 import os
 import random
 
+import matplotlib.pyplot as plt
+
 import torch
 from torch import nn
 from torch.utils.data import Dataset, IterableDataset
 from torch.utils.tensorboard import SummaryWriter
-
 import torch.cuda.amp as amp
 
 from toy_data import ReProjectorDataset
@@ -28,8 +29,9 @@ class OneHotDataset(Dataset):
         return sample @ self.proj, idx
 
 
+
 @torch.no_grad()
-def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
+def measure_monosemanticity(model, projection_matrix, norm, plot=False, device="cpu"):
     """
     model: a d -> h -> d mlp.
     projection_matrix: np array that projects G -> d.
@@ -43,12 +45,10 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
     model.to(device)
     model.eval()
 
-    # for each neuron in the activation, compute:
-    # - max activation over all samples
-    # - average activation over all samples
     num_neurons = model.hidden_size
-    max_activations = torch.zeros(num_neurons).to(device)
-    sum_activations = torch.zeros(num_neurons).to(device)
+    num_features = projection_matrix.shape[0]
+    # activations_all = torch.zeros(num_neurons, num_features).to(device)
+    activations_all = torch.zeros(num_features, num_neurons).to(device)
 
     for batch_idx, (sample, n_idx) in enumerate(data_loader):
         sample = sample.to(device)
@@ -56,13 +56,33 @@ def measure_monosemanticity(model, projection_matrix, norm, device="cpu"):
 
         activations = model(normed, return_activations=True)
 
-        batch_max = torch.amax(activations, dim=0)
-        max_activations = torch.max(max_activations, batch_max)
-
         clipped_activations = torch.clamp(activations, min=0)
-        sum_activations += torch.sum(clipped_activations, dim=0)
-    
+        activations_all[n_idx, :] = clipped_activations.squeeze()
+
+    monosemanticity = torch.zeros(num_neurons).to(device)
+    max_activations = torch.max(activations_all, dim=0).values
+    sum_activations = torch.sum(activations_all, dim=0)
     monosemanticity = max_activations / (sum_activations + 1e-10)
+
+    if plot:
+        sorted_neurons = torch.argsort(monosemanticity, descending=True)
+        sorted_features = torch.argsort(torch.max(activations_all, dim=1).values, descending=True)
+
+        activations_sorted = activations_all[sorted_features, :][:, sorted_neurons].cpu().numpy()
+
+        # Rescale neuron activations
+        max_activations_sorted = np.max(activations_sorted, axis=0)
+        rescaled_activations_sorted = activations_sorted / (max_activations_sorted + 1e-10)
+        rescaled_activations_sorted = rescaled_activations_sorted.T
+
+        plt.figure()
+        plt.imshow(rescaled_activations_sorted, aspect='auto', cmap='viridis')
+        plt.xlabel('Features')
+        plt.ylabel('Neurons')
+        plt.title('Neuron Activations by Features')
+        plt.colorbar(label='Activation')
+        plt.show()
+
     return monosemanticity
 
 
@@ -188,7 +208,7 @@ def do_analysis(checkpoint_dir):
 def analyse_model(model, name, dataset, layernorm):
     print()
     print('analyzing', name)
-    monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu")
+    monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu", plot=True)
     print('monosemanticity', monosemanticity.mean().item())
     print('monosemanticity max', monosemanticity.max().item())
     np_mono = monosemanticity.cpu().numpy()
@@ -255,5 +275,10 @@ if __name__ == "__main__":
     # main(run_num=1, name=run_name)
     # main(run_num=2, name=run_name)
     # print("done")
-
-    do_analysis("projection_out")
+    
+    print("=======")
+    do_analysis("projection_out/964786/0")
+    print("=======")
+    do_analysis("projection_out/964786/1")
+    print("=======")
+    # do_analysis("projection_out/964786/2")
