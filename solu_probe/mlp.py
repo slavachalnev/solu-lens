@@ -15,7 +15,7 @@ class SoLU(nn.Module):
 
 
 class SoluMLP(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, output_size: int, norm=True, temp=1.0, alpha=1.0):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, norm=True, skip=False, temp=1.0, alpha=1.0):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -28,25 +28,30 @@ class SoluMLP(nn.Module):
         self.activation = SoLU()
         self.temperature = temp
         self.alpha = alpha
+        self.skip = skip
     
     def forward(self, x, return_activations=False):
         """
         args:
             return_activations: if True, only return the activations of the first layer.
         """
-        x = self.fc1(x)
-        x = self.activation(x, temperature=self.temperature, alpha=self.alpha)
+        h = self.fc1(x)
+        h = self.activation(h, temperature=self.temperature, alpha=self.alpha)
 
         if return_activations:
-            return x
+            return h
 
         if self.norm:
-            x = self.layer_norm(x)
-        x = self.fc2(x)
-        return x
+            h = self.layer_norm(h)
+        h = self.fc2(h)
+
+        if self.skip:
+            h = h + x
+
+        return h
 
 class GeluMLP(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, output_size: int):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, skip=False):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -54,18 +59,23 @@ class GeluMLP(nn.Module):
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
         self.activation = nn.GELU()
+        self.skip = skip
     
     def forward(self, x, return_activations=False):
         """
         args:
             return_activations: if True, only return the activations of the first layer.
         """
-        x = self.fc1(x)
-        x = self.activation(x)
+        h = self.fc1(x)
+        h = self.activation(h)
 
         if return_activations:
-            return x
+            return h
 
-        x = self.fc2(x)
-        return x
+        h = self.fc2(h)
+
+        if self.skip:
+            h = h + x
+
+        return h
     
