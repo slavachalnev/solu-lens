@@ -230,10 +230,8 @@ def main(run_num, name):
     out_dir = os.path.join("projection_out", name, str(run_num))
     os.makedirs(out_dir)
 
-    # d = 64
-    # G = 512
-    d = 32
-    G = 256
+    d = 64
+    G = 512
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = ReProjectorDataset(d=d, G=G, device=device)
 
@@ -256,7 +254,7 @@ def main(run_num, name):
     torch.save(gelu_mlp.state_dict(), f"{out_dir}/gelu_mlp.pt")
 
     ### graft ###
-    graft_steps = 3000000
+    graft_steps = 2000000
     
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)

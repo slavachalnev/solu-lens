@@ -67,7 +67,15 @@ class ToyFeatureDataset(Dataset):
     
 
 class ReProjectorDataset(IterableDataset):
-    def __init__(self, d=64, G=512, device='cpu', dtype=torch.float16, proj=None, target_proj=None):
+    def __init__(self,
+                 d=64,
+                 G=512,
+                 num_active_features=5,
+                 device='cpu',
+                 dtype=torch.float32,
+                 proj=None,
+                 target_proj=None,
+                ):
         """
         args:
             d: number of dimensions
@@ -88,7 +96,7 @@ class ReProjectorDataset(IterableDataset):
 
         # probability of a feature being active by zipf's law
         self.probs = torch.tensor([(i+1)**(-1.1) for i in range(G)]).to(dtype)
-        self.probs = self.probs / self.probs.sum()
+        self.probs = (self.probs * num_active_features) / self.probs.sum()
         self.probs = self.probs.to(device)
 
     def __iter__(self):
@@ -119,6 +127,7 @@ class ReProjectorDataset(IterableDataset):
 
 if __name__ == '__main__':
     dataset = ReProjectorDataset()
+    dataset.get_batch(32)
     # data_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 
 
