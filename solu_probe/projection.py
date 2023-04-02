@@ -2,6 +2,7 @@ import numpy as np
 import time
 import os
 import random
+import json
 
 import matplotlib.pyplot as plt
 
@@ -224,15 +225,37 @@ def analyse_model(model, name, dataset, layernorm):
     print()
 
 
-def main(run_num, name):
-    # TODO: log all parameters to file
+def log_hyperparameters(params, out_dir):
+    with open(os.path.join(out_dir, "params.json"), "w") as f:
+        json.dump(params, f, indent=4)
 
+
+def main(run_num, name):
     out_dir = os.path.join("projection_out", name, str(run_num))
     os.makedirs(out_dir)
 
     d = 64
     G = 512
+    graft_steps = 2000000
+    train_steps = 1000000
+    batch_size = 65536
+    learning_rate = 5e-3
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    hyperparams = {
+        "name": name,
+        "run_num": run_num,
+        "d": d,
+        "G": G,
+        "graft_steps": graft_steps,
+        "train_steps": train_steps,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "device": str(device),
+    }
+    log_hyperparameters(hyperparams, out_dir)
+
     dataset = ReProjectorDataset(d=d, G=G, device=device)
 
     # save projection matrices
@@ -247,29 +270,47 @@ def main(run_num, name):
 
     writer = SummaryWriter(log_dir=f"runs/{name}_{run_num}")
 
-    train(model=sequential_mlp, dataset=dataset, writer=writer, name="original_gelu", device=device, num_steps=1000000)
+    train(model=sequential_mlp,
+          dataset=dataset,
+          writer=writer,
+          name="original_gelu",
+          device=device,
+          num_steps=train_steps,
+          learning_rate=learning_rate,
+          batch_size=batch_size,
+          )
 
     # save the models
     torch.save(layernorm.state_dict(), f"{out_dir}/layernorm.pt")
     torch.save(gelu_mlp.state_dict(), f"{out_dir}/gelu_mlp.pt")
 
     ### graft ###
-    graft_steps = 2000000
-    
+
+    graft_kwargs = {
+        "dataset": dataset,
+        "writer": writer,
+        "layernorm": layernorm,
+        "target_model": gelu_mlp,
+        "device": device,
+        "num_steps": graft_steps,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+    }
+
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
+    train(model=model, name="graft_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
 
     model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_big_solu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
+    train(model=model, name="graft_big_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
+    train(model=model, name="graft_gelu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
     model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, dataset=dataset, writer=writer, name="graft_big_gelu", layernorm=layernorm, target_model=gelu_mlp, device=device, num_steps=graft_steps)
+    train(model=model, name="graft_big_gelu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
 
     writer.close()
