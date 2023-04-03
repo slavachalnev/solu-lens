@@ -3,6 +3,7 @@ import time
 import os
 import random
 import json
+import argparse
 
 import matplotlib.pyplot as plt
 
@@ -70,7 +71,7 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir
         # Sort neurons by monosemanticity
         sorted_neurons = torch.argsort(monosemanticity, descending=True)
 
-        # Sort features as https://arxiv.org/pdf/2211.09169.pdf.
+        # Sort features as per https://arxiv.org/pdf/2211.09169.pdf.
         activations_sorted_neurons = activations_all[:, sorted_neurons]
         most_activated_neurons = torch.argmax(activations_sorted_neurons, dim=1)
         sorted_features = torch.argsort(most_activated_neurons)
@@ -317,17 +318,20 @@ def main(run_num, name):
 
 
 if __name__ == "__main__":
-    # generate random name
-    run_name = str(random.randint(0, 1000000))
-
-    main(run_num=0, name=run_name)
-    main(run_num=1, name=run_name)
-    main(run_num=2, name=run_name)
-    print("done")
+    parser = argparse.ArgumentParser(description="Train or analyze a model.")
+    parser.add_argument("--mode", choices=["train", "analyse"], required=True, help="Choose between 'train' and 'analyse'.")
+    parser.add_argument("--num_runs", type=int, default=3, help="Number of runs (default: 3).")
+    parser.add_argument("--name", type=str, help="Name for the run. If not provided, a random name will be generated.")
+    parser.add_argument("--checkpoint_dir", type=str, help="Directory with saved checkpoints for analysis.")
     
-    # print("=======")
-    # do_analysis("projection_out/964786/0")
-    # print("=======")
-    # do_analysis("projection_out/964786/1")
-    # print("=======")
-    # do_analysis("projection_out/964786/2")
+    args = parser.parse_args()
+
+    if args.mode == "train":
+        run_name = args.name or str(random.randint(0, 1000000))
+        for run_num in range(args.num_runs):
+            main(run_num=run_num, name=run_name)
+        print("done")
+    elif args.mode == "analyse":
+        if args.checkpoint_dir is None:
+            parser.error("--checkpoint_dir is required for mode 'analyse'.")
+        do_analysis(args.checkpoint_dir)
