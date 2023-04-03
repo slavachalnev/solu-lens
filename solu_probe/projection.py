@@ -231,7 +231,7 @@ def log_hyperparameters(params, out_dir):
         json.dump(params, f, indent=4)
 
 
-def main(run_num, name):
+def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, dataset_path=None):
     out_dir = os.path.join("projection_out", name, str(run_num))
     os.makedirs(out_dir)
 
@@ -257,7 +257,13 @@ def main(run_num, name):
     }
     log_hyperparameters(hyperparams, out_dir)
 
-    dataset = ReProjectorDataset(d=d, G=G, device=device)
+    # Load the existing dataset if dataset_path is provided, otherwise create a new one
+    if dataset_path:
+        proj = np.load(f"{dataset_path}/proj.npy")
+        target_proj = np.load(f"{dataset_path}/target_proj.npy")
+        dataset = ReProjectorDataset(d=d, G=G, device=device, proj=proj, target_proj=target_proj)
+    else:
+        dataset = ReProjectorDataset(d=d, G=G, device=device)
 
     # save projection matrices
     proj = dataset.proj.cpu().numpy()
@@ -267,6 +273,13 @@ def main(run_num, name):
 
     layernorm = nn.LayerNorm(d)
     gelu_mlp = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+
+    # Load pre-trained models if paths are provided
+    if pre_trained_layernorm:
+        layernorm.load_state_dict(torch.load(pre_trained_layernorm, map_location=device))
+    if pre_trained_gelu_mlp:
+        gelu_mlp.load_state_dict(torch.load(pre_trained_gelu_mlp, map_location=device))
+
     sequential_mlp = nn.Sequential(layernorm, gelu_mlp)
 
     writer = SummaryWriter(log_dir=f"runs/{name}_{run_num}")
@@ -323,13 +336,17 @@ if __name__ == "__main__":
     parser.add_argument("--num_runs", type=int, default=3, help="Number of runs (default: 3).")
     parser.add_argument("--name", type=str, help="Name for the run. If not provided, a random name will be generated.")
     parser.add_argument("--checkpoint_dir", type=str, help="Directory with saved checkpoints for analysis.")
-    
+    parser.add_argument("--pre_trained_gelu_mlp", type=str, help="Path to pre-trained GeluMLP model.")
+    parser.add_argument("--pre_trained_layernorm", type=str, help="Path to pre-trained LayerNorm model.")
+    parser.add_argument("--dataset_path", type=str, help="Path to existing dataset (proj.npy and target_proj.npy).")
+
     args = parser.parse_args()
 
     if args.mode == "train":
         run_name = args.name or str(random.randint(0, 1000000))
         for run_num in range(args.num_runs):
-            main(run_num=run_num, name=run_name)
+            main(run_num=run_num, name=run_name, pre_trained_gelu_mlp=args.pre_trained_gelu_mlp,
+                 pre_trained_layernorm=args.pre_trained_layernorm, dataset_path=args.dataset_path)
         print("done")
     elif args.mode == "analyse":
         if args.checkpoint_dir is None:
