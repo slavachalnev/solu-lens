@@ -83,6 +83,9 @@ class ReProjectorDataset(IterableDataset):
             proj: np projection matrix. If None, randomly initialized.
             target_proj: np projection matrix. If None, randomly initialized.
         """
+        self.d = d
+        self.G = G
+
         # project the ground truth features into a lower dimensional space
         if proj is None:
             self.proj = torch.randn(G, d).to(device).to(dtype)

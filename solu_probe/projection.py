@@ -101,7 +101,8 @@ def train(model,
           name,
           layernorm=None,
           target_model=None,
-          num_steps=1000000,
+          num_steps=500000,
+          warmup_steps=0,
           batch_size=65536,
           learning_rate=5e-3,
           device="cpu",
@@ -128,9 +129,15 @@ def train(model,
 
     t0 = time.time()
 
-    for batch_idx in range(num_steps):
+    total_steps = num_steps + warmup_steps
+    for batch_idx in range(total_steps):
         # t0 = time.time()
-        sample, target = dataset.get_batch(batch_size)
+        if batch_idx < warmup_steps:
+            # random sample
+            d = dataset.d
+            sample, target = torch.rand(batch_size, d, device=device), torch.rand(batch_size, d, device=device)
+        else:
+            sample, target = dataset.get_batch(batch_size)
         # t1 = time.time()
         # print('getting batch took \t', t1 - t0, 'seconds.')
 
@@ -155,6 +162,8 @@ def train(model,
         # print('backward took \t\t', t3 - t2, 'seconds.')
         scaler.step(optimizer)
         scaler.update()
+        # t4 = time.time()
+        # print('update took \t\t', t4 - t3, 'seconds.')
         
         if batch_idx % 1000 == 0:
             print(f"batch_idx: {batch_idx}, loss: {loss.item()}")
@@ -175,9 +184,6 @@ def train(model,
             writer.add_scalar(f"Monosemanticity/{name}_mean_top", np_mono[-100:].mean(), batch_idx)
             writer.add_scalar(f"Monosemanticity/{name}_num_mono", np.count_nonzero(np_mono > 0.9), batch_idx)
         
-        if batch_idx >= num_steps:
-            break
-
 
 def do_analysis(checkpoint_dir):
     # build dataset
@@ -237,7 +243,8 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
 
     d = 64
     G = 512
-    graft_steps = 2000000
+    graft_steps = 500000
+    warmup_steps = 500000
     train_steps = 1000000
     batch_size = 65536
     learning_rate = 5e-3
@@ -250,10 +257,14 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
         "d": d,
         "G": G,
         "graft_steps": graft_steps,
+        "warmup_steps": warmup_steps,
         "train_steps": train_steps,
         "batch_size": batch_size,
         "learning_rate": learning_rate,
         "device": str(device),
+        "original_pre_trained_gelu_mlp": pre_trained_gelu_mlp,
+        "oririnal_pre_trained_layernorm": pre_trained_layernorm,
+        "original_dataset_path": dataset_path,
     }
     log_hyperparameters(hyperparams, out_dir)
 
@@ -284,15 +295,17 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
 
     writer = SummaryWriter(log_dir=f"runs/{name}_{run_num}")
 
-    train(model=sequential_mlp,
-          dataset=dataset,
-          writer=writer,
-          name="original_gelu",
-          device=device,
-          num_steps=train_steps,
-          learning_rate=learning_rate,
-          batch_size=batch_size,
-          )
+    if not pre_trained_gelu_mlp:
+        train(model=sequential_mlp,
+            dataset=dataset,
+            writer=writer,
+            name="original_gelu",
+            device=device,
+            num_steps=train_steps,
+            warmup_steps=0,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            )
 
     # save the models
     torch.save(layernorm.state_dict(), f"{out_dir}/layernorm.pt")
@@ -307,6 +320,7 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
         "target_model": gelu_mlp,
         "device": device,
         "num_steps": graft_steps,
+        "warmup_steps": warmup_steps,
         "batch_size": batch_size,
         "learning_rate": learning_rate,
     }
