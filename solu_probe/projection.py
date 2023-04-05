@@ -129,9 +129,8 @@ def train(model,
     scaler = amp.GradScaler()
 
     # Add the cosine decay scheduler
-    decay_steps = num_steps - warmup_steps
     final_learning_rate = 0.1 * learning_rate
-    scheduler = sched.CosineAnnealingLR(optimizer, decay_steps, final_learning_rate)
+    scheduler = sched.CosineAnnealingLR(optimizer, num_steps, final_learning_rate)
 
 
     t0 = time.time()
@@ -254,9 +253,9 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
 
     d = 64
     G = 512
-    graft_steps = 500000
-    warmup_steps = 500000
-    train_steps = 700000
+    graft_steps = 200000
+    warmup_steps = 400000
+    train_steps = 1000000
     batch_size = 65536
     learning_rate = 8e-3
 
