@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 import torch
 from torch import nn
+import torch.optim.lr_scheduler as sched
 from torch.utils.data import Dataset, IterableDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.cuda.amp as amp
@@ -127,6 +128,12 @@ def train(model,
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scaler = amp.GradScaler()
 
+    # Add the cosine decay scheduler
+    decay_steps = num_steps - warmup_steps
+    final_learning_rate = 0.1 * learning_rate
+    scheduler = sched.CosineAnnealingLR(optimizer, decay_steps, final_learning_rate)
+
+
     t0 = time.time()
 
     total_steps = num_steps + warmup_steps
@@ -138,6 +145,7 @@ def train(model,
             sample, target = torch.rand(batch_size, d, device=device), torch.rand(batch_size, d, device=device)
         else:
             sample, target = dataset.get_batch(batch_size)
+            scheduler.step()
         # t1 = time.time()
         # print('getting batch took \t', t1 - t0, 'seconds.')
 
@@ -168,6 +176,9 @@ def train(model,
         if batch_idx % 1000 == 0:
             print(f"batch_idx: {batch_idx}, loss: {loss.item()}")
             writer.add_scalar(f"Loss/{name}", loss.item(), batch_idx)
+            # Log learning rate to TensorBoard
+            current_lr = scheduler.get_last_lr()[0]
+            writer.add_scalar(f"Learning_rate/{name}", current_lr, batch_idx)
             print('training took \t\t', time.time() - t0, 'seconds.')
             t0 = time.time()
         
@@ -245,9 +256,9 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
     G = 512
     graft_steps = 500000
     warmup_steps = 500000
-    train_steps = 1000000
+    train_steps = 700000
     batch_size = 65536
-    learning_rate = 5e-3
+    learning_rate = 8e-3
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -333,13 +344,13 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
     train(model=model, name="graft_big_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
 
-    model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    train(model=model, name="graft_gelu", **graft_kwargs)
-    torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
+    # model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    # train(model=model, name="graft_gelu", **graft_kwargs)
+    # torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
-    model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, name="graft_big_gelu", **graft_kwargs)
-    torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
+    # model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    # train(model=model, name="graft_big_gelu", **graft_kwargs)
+    # torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
 
     writer.close()
 
