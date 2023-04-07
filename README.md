@@ -3,6 +3,8 @@
 ## Idea
 Make an MLP layer more interpretable by training a more interpretable model to mimic it.
 
+Diagram: https://excalidraw.com/#json=WorQEYTYHiQpDcpeU_So2,4Ypl6yZLv6wVt_VCTpg_ew
+
 ## Implementation
 So far the main experiment is in `projection.py` which first trains a model (see `mlp.py`) on toy projection data (see `toy_data.py`), then trains a model to mimic the first model's behaviour. The second model is either a GeLU or SoLU MLP.
 
