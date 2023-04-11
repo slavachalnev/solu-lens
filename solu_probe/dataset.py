@@ -1,3 +1,4 @@
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -26,15 +27,23 @@ class ModelDataset(Dataset):
     TODO: make layers selectable. Currently all layers are used.
     """
 
-    def __init__(self, model, batch_size, device="cpu"):
+    def __init__(self, model, batch_size, n_random=0, device="cpu"):
         self.model = model  # gpt Transformer Lens model
         self.device = device
+        self.batch_size = batch_size
+        self.n_random = n_random
+        self.d_model = model.cfg.d_model
 
         self.data_loader = big_owt_data_loader(tokenizer=model.tokenizer, batch_size=batch_size)
 
         num_layers = len(model.blocks)
         self.pre_hs = [None] * num_layers
         self.post_hs = [None] * num_layers
+
+        # deepcopy layernorms
+        model.to("cpu")
+        self.layernorms = [deepcopy(model.blocks[layer].ln2).to(device) for layer in range(num_layers)]
+        model.to(device)
 
         self.fwd_hooks = []
         for layer in range(num_layers):
@@ -44,7 +53,7 @@ class ModelDataset(Dataset):
             ]
 
     def create_callback(self, layer, post=False):
-        """Create a callback for a given layer."""
+        """Save in and out activations for mlp at a given layer."""
 
         def callback(value, hook):
             """Callback for a given layer."""
@@ -53,8 +62,8 @@ class ModelDataset(Dataset):
                 self.post_hs[layer] = h
 
             else:
-                layernorm = self.model.blocks[layer].ln2
-                h = layernorm(value).detach().clone().cpu().to(torch.float16)
+                h = self.layernorms[layer](value)
+                h = h.detach().clone().cpu().to(torch.float16)
                 self.pre_hs[layer] = h
             return value
 
@@ -73,13 +82,22 @@ class ModelDataset(Dataset):
             fwd_hooks=self.fwd_hooks,
         )
     
+    @torch.no_grad()
     def generate_activations(self):
+
+        # random input to MLPs
+        for i in range(self.n_random):
+            pre_hs = [torch.randn(self.batch_size, self.d_model).to(self.device) for _ in range(len(self.model.blocks))]
+            post_hs = []
+            
+            for layer, pre_h in enumerate(pre_hs):
+                post_h = self.model.blocks[layer].mlp(pre_h)
+                post_hs.append(post_h)
+            
+            yield pre_hs, post_hs
+
+        # normal forward pass through model
         for batch in self.data_loader:
             self.get_pre_post(batch)
             yield self.pre_hs, self.post_hs
-
-
-
-
-
-
+        
