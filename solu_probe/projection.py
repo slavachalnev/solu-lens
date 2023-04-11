@@ -16,7 +16,100 @@ import torch.cuda.amp as amp
 
 from toy_data import ReProjectorDataset
 from mlp import GeluMLP, SoluMLP
-from utils import measure_monosemanticity, train
+from utils import measure_monosemanticity
+
+
+def train(model,
+          dataset,
+          writer,
+          name,
+          layernorm=None,
+          target_model=None,
+          num_steps=500000,
+          warmup_steps=0,
+          batch_size=65536,
+          learning_rate=5e-3,
+          device="cpu",
+          ):
+
+    model.to(device)
+    model.train()
+
+    if target_model is not None:
+        # if we have a target model, we need to normalize the input.
+        # if we don't have a target model, assume layernorm is part of the model.
+        assert layernorm is not None
+        target_model.to(device)
+        target_model.eval()
+        layernorm.to(device)
+        layernorm.eval()
+    else:
+        assert layernorm is None
+        assert isinstance(model, nn.Sequential)
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    scaler = amp.GradScaler()
+
+    t0 = time.time()
+
+    total_steps = num_steps + warmup_steps
+    for batch_idx in range(total_steps):
+        # t0 = time.time()
+        if batch_idx < warmup_steps:
+            # random sample
+            d = dataset.d
+            sample, target = torch.rand(batch_size, d, device=device), torch.rand(batch_size, d, device=device)
+        else:
+            sample, target = dataset.get_batch(batch_size)
+        # t1 = time.time()
+        # print('getting batch took \t', t1 - t0, 'seconds.')
+
+        sample = sample.to(device)
+
+        if target_model is not None:
+            with torch.no_grad():
+                with amp.autocast():
+                    sample = layernorm(sample)
+                    target = target_model(sample)
+        else:
+            target = target.to(device)
+
+        optimizer.zero_grad()
+        with amp.autocast():
+            output = model(sample)
+            loss = criterion(output, target)
+        # t2 = time.time()
+        # print('forward pass took \t', t2 - t1, 'seconds.')
+        scaler.scale(loss).backward()
+        # t3 = time.time()
+        # print('backward took \t\t', t3 - t2, 'seconds.')
+        scaler.step(optimizer)
+        scaler.update()
+        # t4 = time.time()
+        # print('update took \t\t', t4 - t3, 'seconds.')
+        
+        if batch_idx % 1000 == 0:
+            print(f"batch_idx: {batch_idx}, loss: {loss.item()}")
+            writer.add_scalar(f"Loss/{name}", loss.item(), batch_idx)
+            # Log learning rate to TensorBoard
+            print('training took \t\t', time.time() - t0, 'seconds.')
+            t0 = time.time()
+        
+        if batch_idx % 10000 == 0:
+            if target_model is None:
+                monosemanticity = measure_monosemanticity(model[1], dataset.proj, model[0], device=device)
+            else:
+                monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device=device)
+
+            writer.add_scalar(f"Monosemanticity/{name}", monosemanticity.mean().item(), batch_idx)
+            writer.add_scalar(f"Monosemanticity/{name}_max", monosemanticity.max().item(), batch_idx)
+            np_mono = monosemanticity.cpu().numpy()
+            np_mono = np.asarray(sorted(np_mono))
+            writer.add_scalar(f"Monosemanticity/{name}_mean_top", np_mono[-100:].mean(), batch_idx)
+            writer.add_scalar(f"Monosemanticity/{name}_num_mono", np.count_nonzero(np_mono > 0.9), batch_idx)
+        
+
 
 
 def do_analysis(checkpoint_dir):
@@ -51,19 +144,16 @@ def do_analysis(checkpoint_dir):
             raise ValueError(f"unknown model name {model_name}")
         
         model.load_state_dict(model_dict)
-        analyse_model(model, model_name, dataset, layernorm)
 
-
-def analyse_model(model, name, dataset, layernorm):
-    print()
-    print('analyzing', name)
-    monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu", plot=True)
-    print('monosemanticity', monosemanticity.mean().item())
-    print('monosemanticity max', monosemanticity.max().item())
-    np_mono = monosemanticity.cpu().numpy()
-    np_mono = np.asarray(sorted(np_mono))
-    print('monosemanticity mean top 100', np_mono[-100:].mean())
-    print()
+        # analyse model
+        print('analyzing', model_name)
+        monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu", plot=True)
+        print('monosemanticity', monosemanticity.mean().item())
+        print('monosemanticity max', monosemanticity.max().item())
+        np_mono = monosemanticity.cpu().numpy()
+        np_mono = np.asarray(sorted(np_mono))
+        print('monosemanticity mean top 100', np_mono[-100:].mean())
+        print()
 
 
 def log_hyperparameters(params, out_dir):
