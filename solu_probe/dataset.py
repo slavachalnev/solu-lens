@@ -64,13 +64,13 @@ class ModelDataset(Dataset):
             # we want batch_size * n_ctx, d_model
 
             if post:
-                h = value.detach().clone().cpu()
+                h = value.detach().clone()
                 h = h.reshape(-1, self.d_model)
                 self.post_hs[layer] = h
 
             else:
                 h = self.layernorms[layer](value)
-                h = h.detach().clone().cpu()
+                h = h.detach().clone()
                 h = h.reshape(-1, self.d_model)
                 self.pre_hs[layer] = h
             return value
