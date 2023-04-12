@@ -107,7 +107,8 @@ class ModelDataset(Dataset):
             yield pre_hs, post_hs
 
         # normal forward pass through model
-        for batch in self.data_loader:
-            self.get_pre_post(batch)
-            yield self.pre_hs, self.post_hs
+        while True:
+            for batch in self.data_loader:
+                self.get_pre_post(batch)
+                yield self.pre_hs, self.post_hs
         

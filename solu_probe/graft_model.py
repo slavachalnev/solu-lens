@@ -43,6 +43,7 @@ def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"
                     torch.save(layer.state_dict(), os.path.join(checkpoints_dir, f"layer_{layer_idx}_step_{batch_idx}.pt"))
         
         if batch_idx >= steps:
+            print("Done training at step", batch_idx)
             break
 
 
@@ -71,8 +72,8 @@ def main():
           dataset=dataset,
           writer=writer,
           checkpoints_dir=checkpoints_dir,
-          steps=1000,
-          lr=5e-3,
+          steps=21000,
+          lr=3e-3,
           device=device,
           )
 
