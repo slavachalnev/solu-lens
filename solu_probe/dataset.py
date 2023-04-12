@@ -13,7 +13,9 @@ from transformer_lens import utils as tutils
 
 
 def big_owt_data_loader(tokenizer, batch_size=8):
-    data = load_dataset("openwebtext", split="train[:10%]")
+    # data = load_dataset("openwebtext", split="train[:10%]")
+    data = load_dataset("NeelNanda/pile-10k", split="train")
+
     dataset = tutils.tokenize_and_concatenate(data, tokenizer)
     data_loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=True, drop_last=True
@@ -33,6 +35,7 @@ class ModelDataset(Dataset):
         self.batch_size = batch_size
         self.n_random = n_random
         self.d_model = model.cfg.d_model
+        self.n_ctx = model.cfg.n_ctx
 
         self.data_loader = big_owt_data_loader(tokenizer=model.tokenizer, batch_size=batch_size)
 
@@ -57,13 +60,18 @@ class ModelDataset(Dataset):
 
         def callback(value, hook):
             """Callback for a given layer."""
+            # h shape is batch_size, n_ctx, d_model
+            # we want batch_size * n_ctx, d_model
+
             if post:
-                h = value.detach().clone().cpu().to(torch.float16)
+                h = value.detach().clone().cpu()
+                h = h.reshape(-1, self.d_model)
                 self.post_hs[layer] = h
 
             else:
                 h = self.layernorms[layer](value)
-                h = h.detach().clone().cpu().to(torch.float16)
+                h = h.detach().clone().cpu()
+                h = h.reshape(-1, self.d_model)
                 self.pre_hs[layer] = h
             return value
 
@@ -87,13 +95,15 @@ class ModelDataset(Dataset):
 
         # random input to MLPs
         for i in range(self.n_random):
-            pre_hs = [torch.randn(self.batch_size, self.d_model).to(self.device) for _ in range(len(self.model.blocks))]
+            pre_hs = [torch.randn(self.batch_size, self.n_ctx, self.d_model).to(self.device) for _ in range(len(self.model.blocks))]
             post_hs = []
             
             for layer, pre_h in enumerate(pre_hs):
                 post_h = self.model.blocks[layer].mlp(pre_h)
+                post_h = post_h.reshape(-1, self.d_model)
                 post_hs.append(post_h)
             
+            pre_hs = [pre_h.reshape(-1, self.d_model) for pre_h in pre_hs]
             yield pre_hs, post_hs
 
         # normal forward pass through model
