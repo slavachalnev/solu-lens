@@ -1,7 +1,10 @@
 # this is the main script for training the graft mlps from a pre-trained transformer model.
+import os
+import time
 
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
 import transformer_lens
 from transformer_lens import HookedTransformer
@@ -10,7 +13,7 @@ from dataset import ModelDataset
 from mlp import SoluMLP
 
 
-def train(layers, dataset, steps, lr=1e-4, device="cpu"):
+def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"):
 
     optimizers = []
     for layer in layers:
@@ -24,13 +27,20 @@ def train(layers, dataset, steps, lr=1e-4, device="cpu"):
         for layer_idx, layer in enumerate(layers):
             optimizer = optimizers[layer_idx]
             optimizer.zero_grad()
+
             pred = layer(in_acts[layer_idx])
+
             loss = criterion(pred, out_acts[layer_idx])
             loss.backward()
             optimizer.step()
         
-        if batch_idx % 100 == 0:
-            print(f"batch {batch_idx}, loss {loss.item()}")
+            if batch_idx % 10 == 0:
+                print(f"batch {batch_idx}, layer {layer_idx}, loss {loss.item()}")
+                writer.add_scalar('Layer {}/Loss'.format(layer_idx), loss.item(), batch_idx)
+            
+            if batch_idx % 10000 == 0:
+                for layer_idx, layer in enumerate(layers):
+                    torch.save(layer.state_dict(), os.path.join(checkpoints_dir, f"layer_{layer_idx}_step_{batch_idx}.pt"))
         
         if batch_idx >= steps:
             break
@@ -39,6 +49,10 @@ def train(layers, dataset, steps, lr=1e-4, device="cpu"):
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    writer = SummaryWriter()
+    checkpoints_dir = 'checkpoints'
+    os.makedirs(checkpoints_dir)
+
     d_model = 512
     n_layers = 4
     model_type = "gelu-4l"
@@ -46,15 +60,21 @@ def main():
     # pre-trained model
     gpt_model = HookedTransformer.from_pretrained(model_type, device=device)
 
-    dataset = ModelDataset(model=gpt_model, batch_size=8, device=device)
+    dataset = ModelDataset(model=gpt_model, batch_size=32, n_random=0, device=device)
 
     # graft models
     graft_layers = []
     for _ in range(n_layers):
         graft_layers.append(SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model))
     
-    # train
-    train(layers=graft_layers, dataset=dataset, steps=1000, lr=1e-4, device=device)
+    train(layers=graft_layers,
+          dataset=dataset,
+          writer=writer,
+          checkpoints_dir=checkpoints_dir,
+          steps=1000,
+          lr=5e-3,
+          device=device,
+          )
 
 
 if __name__ == '__main__':
