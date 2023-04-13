@@ -1,6 +1,8 @@
 import time
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
@@ -88,4 +90,74 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir
         plt.show()
 
     return monosemanticity
+
+
+def compute_difference_matrix(activations_mlp1, activations_mlp2):
+    return np.abs(activations_mlp1[:, np.newaxis] - activations_mlp2)
+
+
+@torch.no_grad()
+def mlp_dists(model_1, model_2, dataloader, device):
+    """
+    Args:
+        model_1: HookedTransformer GPT model
+        model_2: HookedTransformer GPT model
+        dataloader: dataloader for the dataset
+    """
+    
+    model_1.to(device)
+    model_2.to(device)
+    model_1.eval()
+    model_2.eval()
+
+    d_mlp = model_1.cfg.d_model * 4
+    n_layers = len(model_1.blocks)
+
+    acts_1 = [None] * n_layers
+    acts_2 = [None] * n_layers
+
+    def create_callback(layer, is_model_1):
+        """Save mlp activations for a given layer."""
+
+        def callback(value, hook):
+            """Callback for a given layer."""
+            h = value.detach().clone().cpu()
+            h = h.reshape(-1, d_mlp).numpy()
+
+            if is_model_1:
+                acts_1[layer] = h
+            else:
+                acts_2[layer] = h
+            return value
+
+        return callback
+    
+    m1_hooks = [(f"blocks.{layer}.mlp.hook_post", create_callback(layer, is_model_1=True)) for layer in range(n_layers)]
+    m2_hooks = [(f"blocks.{layer}.mlp.hook_post", create_callback(layer, is_model_1=False)) for layer in range(n_layers)]
+
+    total_dists = [np.zeros((d_mlp, d_mlp)) for _ in range(n_layers)]
+
+    with model_1.hooks(fwd_hooks=m1_hooks), model_2.hooks(fwd_hooks=m2_hooks):
+        for batch in dataloader:
+            batch = batch.to(device)
+            model_1(batch)
+            model_2(batch)
+
+            # Compute (d_mlp x d_mlp) l1 distance matrix for each layer
+            dists = [compute_difference_matrix(acts_1[layer], acts_2[layer]) for layer in range(n_layers)]
+
+            # Sum across all batches
+            total_dists = [total_dists[layer] + dists[layer] for layer in range(n_layers)]
+
+    # Average across all batches
+    total_dists = [total_dists[layer] / len(dataloader) for layer in range(n_layers)]
+
+    # compute optimal permutation of neurons for each layer
+    perms = [linear_sum_assignment(dist) for dist in total_dists]
+
+    # compute average distance between neurons for each layer after optimal permutation
+    avg_dists = [np.mean(total_dists[layer][perm]) for layer, perm in enumerate(perms)]
+
+    return avg_dists
+
 
