@@ -41,16 +41,16 @@ def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"
             if batch_idx % 10 == 0:
                 print(f"batch {batch_idx}, layer {layer_idx}, loss {loss.item()}")
                 writer.add_scalar('Layer {}/Loss'.format(layer_idx), loss.item(), batch_idx)
-            
-            if batch_idx % 1000 == 0:
-                dists = mlp_dists(layers=layers, dataset=val_ds, device=device)
-                print('dists is ', dists)
-                for dist in dists:
-                    writer.add_scalar(f"Layer {layer_idx}/act_dist", dist, batch_idx)
-            
-            if batch_idx % 10000 == 0:
-                for layer_idx, layer in enumerate(layers):
-                    torch.save(layer.state_dict(), os.path.join(checkpoints_dir, f"layer_{layer_idx}_step_{batch_idx}.pt"))
+        
+        if batch_idx % 1000 == 0:
+            dists = mlp_dists(layers=layers, dataset=val_ds, device=device)
+            print(f'batch {batch_idx}, dists is ', dists)
+            for i, dist in enumerate(dists):
+                writer.add_scalar(f"Layer {i}/act_dist", dist, batch_idx)
+        
+        if batch_idx % 10000 == 0:
+            for layer_idx, layer in enumerate(layers):
+                torch.save(layer.state_dict(), os.path.join(checkpoints_dir, f"layer_{layer_idx}_step_{batch_idx}.pt"))
         
         if batch_idx >= steps:
             print("Done training at step", batch_idx)
