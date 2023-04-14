@@ -38,7 +38,7 @@ def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"
             loss.backward()
             optimizer.step()
         
-            if batch_idx % 10 == 0:
+            if batch_idx % 100 == 0:
                 print(f"batch {batch_idx}, layer {layer_idx}, loss {loss.item()}")
                 writer.add_scalar('Layer {}/Loss'.format(layer_idx), loss.item(), batch_idx)
         

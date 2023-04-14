@@ -133,7 +133,7 @@ def mlp_dists(layers, dataset, device):
 
     # Average across all batches
     totoal_num_samples = len(dataset) * dataset.batch_size * d_mlp
-    total_dists = [total_dists[layer] / totoal_num_samples for layer in range(n_layers)]
+    total_dists = [total_dists[layer].cpu().numpy() / totoal_num_samples for layer in range(n_layers)]
 
     # compute optimal permutation of neurons for each layer
     perms = [linear_sum_assignment(dist) for dist in total_dists]
