@@ -12,9 +12,12 @@ from transformer_lens import HookedTransformer
 from transformer_lens import utils as tutils
 
 
-def big_owt_data_loader(tokenizer, batch_size=8):
-    # data = load_dataset("openwebtext", split="train[:10%]")
-    data = load_dataset("NeelNanda/pile-10k", split="train")
+def big_data_loader(tokenizer, batch_size=8, big=True):
+
+    if big:
+        data = load_dataset("openwebtext", split="train[:10%]")
+    else:
+        data = load_dataset("NeelNanda/pile-10k", split="train")
 
     dataset = tutils.tokenize_and_concatenate(data, tokenizer)
     data_loader = DataLoader(
@@ -29,7 +32,7 @@ class ModelDataset(Dataset):
     TODO: make layers selectable. Currently all layers are used.
     """
 
-    def __init__(self, model, batch_size, n_random=0, device="cpu"):
+    def __init__(self, model, batch_size, n_random=0, device="cpu", big=True, mid=False):
         self.model = model  # gpt Transformer Lens model
         self.device = device
         self.batch_size = batch_size
@@ -37,7 +40,7 @@ class ModelDataset(Dataset):
         self.d_model = model.cfg.d_model
         self.n_ctx = model.cfg.n_ctx
 
-        self.data_loader = big_owt_data_loader(tokenizer=model.tokenizer, batch_size=batch_size)
+        self.data_loader = big_data_loader(tokenizer=model.tokenizer, batch_size=batch_size, big=big)
 
         num_layers = len(model.blocks)
         self.pre_hs = [None] * num_layers
@@ -50,13 +53,18 @@ class ModelDataset(Dataset):
 
         self.fwd_hooks = []
         for layer in range(num_layers):
-            self.fwd_hooks += [
-                (f"blocks.{layer}.hook_resid_mid", self.create_callback(layer, post=False)),
-                (f"blocks.{layer}.hook_mlp_out", self.create_callback(layer, post=True)),
-            ]
+            # pre hook
+            self.fwd_hooks.append((f"blocks.{layer}.hook_resid_mid", self.create_callback(layer, post=False)))
+            # post hook
+            if mid:
+                self.fwd_hooks.append((f"blocks.{layer}.mlp.hook_post", self.create_callback(layer, post=True, d_post=self.d_model*4)))
+            else:
+                self.fwd_hooks.append((f"blocks.{layer}.hook_mlp_out", self.create_callback(layer, post=True)))
 
-    def create_callback(self, layer, post=False):
+    def create_callback(self, layer, post=False, d_post=None):
         """Save in and out activations for mlp at a given layer."""
+        if d_post is None:
+            d_post = self.d_model
 
         def callback(value, hook):
             """Callback for a given layer."""
@@ -65,7 +73,7 @@ class ModelDataset(Dataset):
 
             if post:
                 h = value.detach().clone()
-                h = h.reshape(-1, self.d_model)
+                h = h.reshape(-1, d_post)
                 self.post_hs[layer] = h
 
             else:
