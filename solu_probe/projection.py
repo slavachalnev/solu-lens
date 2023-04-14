@@ -110,8 +110,6 @@ def train(model,
             writer.add_scalar(f"Monosemanticity/{name}_num_mono", np.count_nonzero(np_mono > 0.9), batch_idx)
         
 
-
-
 def do_analysis(checkpoint_dir):
     # build dataset
     proj = np.load(f"{checkpoint_dir}/proj.npy")

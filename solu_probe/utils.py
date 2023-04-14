@@ -15,8 +15,6 @@ from datasets import load_dataset
 from transformer_lens import utils as tutils
 
 
-
-
 class OneHotDataset(Dataset):
     def __init__(self, proj):
         self.proj = proj
