@@ -11,6 +11,9 @@ from torch.utils.data import Dataset, DataLoader
 import torch.cuda.amp as amp
 from torch.cuda.amp import autocast, GradScaler
 
+from datasets import load_dataset
+from transformer_lens import utils as tutils
+
 
 
 
@@ -97,60 +100,26 @@ def compute_difference_matrix(activations_mlp1, activations_mlp2):
 
 
 @torch.no_grad()
-def mlp_dists(model_1, model_2, dataloader, device):
-    """
-    Args:
-        model_1: HookedTransformer GPT model
-        model_2: HookedTransformer GPT model
-        dataloader: dataloader for the dataset
-    """
-    
-    model_1.to(device)
-    model_2.to(device)
-    model_1.eval()
-    model_2.eval()
-
-    d_mlp = model_1.cfg.d_model * 4
-    n_layers = len(model_1.blocks)
-
-    acts_1 = [None] * n_layers
-    acts_2 = [None] * n_layers
-
-    def create_callback(layer, is_model_1):
-        """Save mlp activations for a given layer."""
-
-        def callback(value, hook):
-            """Callback for a given layer."""
-            h = value.detach().clone().cpu()
-            h = h.reshape(-1, d_mlp).numpy()
-
-            if is_model_1:
-                acts_1[layer] = h
-            else:
-                acts_2[layer] = h
-            return value
-
-        return callback
-    
-    m1_hooks = [(f"blocks.{layer}.mlp.hook_post", create_callback(layer, is_model_1=True)) for layer in range(n_layers)]
-    m2_hooks = [(f"blocks.{layer}.mlp.hook_post", create_callback(layer, is_model_1=False)) for layer in range(n_layers)]
+def mlp_dists(layers, dataset, device):
+    d_mlp = dataset.model.cfg.d_model * 4
+    n_layers = len(layers)
 
     total_dists = [np.zeros((d_mlp, d_mlp)) for _ in range(n_layers)]
 
-    with model_1.hooks(fwd_hooks=m1_hooks), model_2.hooks(fwd_hooks=m2_hooks):
-        for batch in dataloader:
-            batch = batch.to(device)
-            model_1(batch)
-            model_2(batch)
+    for b_idx, (in_acts, out_acts) in enumerate(dataset.generate_activations()):
+        print('b_idx is ', b_idx)
+        if b_idx >= 2:
+            break
 
-            # Compute (d_mlp x d_mlp) l1 distance matrix for each layer
-            dists = [compute_difference_matrix(acts_1[layer], acts_2[layer]) for layer in range(n_layers)]
-
-            # Sum across all batches
-            total_dists = [total_dists[layer] + dists[layer] for layer in range(n_layers)]
+        for layer_idx, layer in enumerate(layers):
+            acts = layer(in_acts[layer_idx], return_activations=True)
+            for a1, a2 in zip(acts, out_acts[layer_idx]):
+                d = compute_difference_matrix(a1.cpu().numpy(), a2.cpu().numpy())
+                total_dists[layer_idx] += d
 
     # Average across all batches
-    total_dists = [total_dists[layer] / len(dataloader) for layer in range(n_layers)]
+    totoal_num_samples = len(dataset) * dataset.batch_size * d_mlp
+    total_dists = [total_dists[layer] / totoal_num_samples for layer in range(n_layers)]
 
     # compute optimal permutation of neurons for each layer
     perms = [linear_sum_assignment(dist) for dist in total_dists]
@@ -161,3 +130,15 @@ def mlp_dists(model_1, model_2, dataloader, device):
     return avg_dists
 
 
+def big_data_loader(tokenizer, batch_size=8, big=True):
+
+    if big:
+        data = load_dataset("openwebtext", split="train[:10%]")
+    else:
+        data = load_dataset("NeelNanda/pile-10k", split="train")
+
+    dataset = tutils.tokenize_and_concatenate(data, tokenizer)
+    data_loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+    )
+    return data_loader

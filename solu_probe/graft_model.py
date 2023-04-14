@@ -1,6 +1,7 @@
 # this is the main script for training the graft mlps from a pre-trained transformer model.
 import os
 import time
+import copy
 
 import torch
 import torch.nn as nn
@@ -11,9 +12,12 @@ from transformer_lens import HookedTransformer
 
 from dataset import ModelDataset
 from mlp import SoluMLP
+from utils import big_data_loader, mlp_dists
 
 
 def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"):
+    val_model = HookedTransformer.from_pretrained("solu-4l", device=device)
+    val_ds = ModelDataset(val_model, batch_size=1, n_random=0, device=device, big=False, mid=True)
 
     optimizers = []
     for layer in layers:
@@ -38,6 +42,12 @@ def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"
                 print(f"batch {batch_idx}, layer {layer_idx}, loss {loss.item()}")
                 writer.add_scalar('Layer {}/Loss'.format(layer_idx), loss.item(), batch_idx)
             
+            if batch_idx % 1000 == 0:
+                dists = mlp_dists(layers=layers, dataset=val_ds, device=device)
+                print('dists is ', dists)
+                for dist in dists:
+                    writer.add_scalar(f"Layer {layer_idx}/act_dist", dist, batch_idx)
+            
             if batch_idx % 10000 == 0:
                 for layer_idx, layer in enumerate(layers):
                     torch.save(layer.state_dict(), os.path.join(checkpoints_dir, f"layer_{layer_idx}_step_{batch_idx}.pt"))
@@ -52,7 +62,7 @@ def main():
 
     writer = SummaryWriter()
     checkpoints_dir = 'checkpoints'
-    os.makedirs(checkpoints_dir)
+    os.makedirs(checkpoints_dir, exist_ok=True)
 
     d_model = 512
     n_layers = 4
@@ -61,7 +71,7 @@ def main():
     # pre-trained model
     gpt_model = HookedTransformer.from_pretrained(model_type, device=device)
 
-    dataset = ModelDataset(model=gpt_model, batch_size=32, n_random=0, device=device)
+    dataset = ModelDataset(model=gpt_model, batch_size=32, n_random=5000, device=device)
 
     # graft models
     graft_layers = []
@@ -72,7 +82,7 @@ def main():
           dataset=dataset,
           writer=writer,
           checkpoints_dir=checkpoints_dir,
-          steps=21000,
+          steps=20001,
           lr=3e-3,
           device=device,
           )
