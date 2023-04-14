@@ -6,24 +6,11 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from datasets import load_dataset
+from utils import big_data_loader
 
 import transformer_lens
 from transformer_lens import HookedTransformer
 from transformer_lens import utils as tutils
-
-
-def big_data_loader(tokenizer, batch_size=8, big=True):
-
-    if big:
-        data = load_dataset("openwebtext", split="train[:10%]")
-    else:
-        data = load_dataset("NeelNanda/pile-10k", split="train")
-
-    dataset = tutils.tokenize_and_concatenate(data, tokenizer)
-    data_loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, drop_last=True
-    )
-    return data_loader
 
 
 class ModelDataset(Dataset):
