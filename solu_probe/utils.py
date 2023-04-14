@@ -96,26 +96,41 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir
 
 
 def compute_difference_matrix(activations_mlp1, activations_mlp2):
-    return np.abs(activations_mlp1[:, np.newaxis] - activations_mlp2)
+    return torch.abs(activations_mlp1[:, None] - activations_mlp2)
+
+
+@torch.jit.script # gives a 3x speedup
+def process_acts(acts, out_acts, total_dists):
+    for a1, a2 in zip(acts, out_acts):
+        d = compute_difference_matrix(a1, a2)
+        total_dists += d
+    return total_dists
 
 
 @torch.no_grad()
 def mlp_dists(layers, dataset, device):
+    for layer in layers:
+        layer.to(device)
+        layer.eval()
+
     d_mlp = dataset.model.cfg.d_model * 4
     n_layers = len(layers)
 
-    total_dists = [np.zeros((d_mlp, d_mlp)) for _ in range(n_layers)]
+    # total_dists = [np.zeros((d_mlp, d_mlp)) for _ in range(n_layers)]
+    total_dists = [torch.zeros((d_mlp, d_mlp), device="cpu") for _ in range(n_layers)]
 
     for b_idx, (in_acts, out_acts) in enumerate(dataset.generate_activations()):
         print('b_idx is ', b_idx)
-        if b_idx >= 2:
+        if b_idx >= 100:
             break
 
         for layer_idx, layer in enumerate(layers):
             acts = layer(in_acts[layer_idx], return_activations=True)
-            for a1, a2 in zip(acts, out_acts[layer_idx]):
-                d = compute_difference_matrix(a1.cpu().numpy(), a2.cpu().numpy())
-                total_dists[layer_idx] += d
+
+            acts = acts.cpu()
+            out_acts[layer_idx] = out_acts[layer_idx].cpu()
+
+            total_dists[layer_idx] = process_acts(acts, out_acts[layer_idx], total_dists[layer_idx])
 
     # Average across all batches
     totoal_num_samples = len(dataset) * dataset.batch_size * d_mlp
