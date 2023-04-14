@@ -71,7 +71,7 @@ def main():
     # pre-trained model
     gpt_model = HookedTransformer.from_pretrained(model_type, device=device)
 
-    dataset = ModelDataset(model=gpt_model, batch_size=32, n_random=5000, device=device)
+    dataset = ModelDataset(model=gpt_model, batch_size=32, n_random=10000, device=device)
 
     # graft models
     graft_layers = []
@@ -82,7 +82,7 @@ def main():
           dataset=dataset,
           writer=writer,
           checkpoints_dir=checkpoints_dir,
-          steps=20001,
+          steps=100001,
           lr=3e-3,
           device=device,
           )

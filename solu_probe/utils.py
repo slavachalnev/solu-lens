@@ -116,12 +116,11 @@ def mlp_dists(layers, dataset, device):
     d_mlp = dataset.model.cfg.d_model * 4
     n_layers = len(layers)
 
-    # total_dists = [np.zeros((d_mlp, d_mlp)) for _ in range(n_layers)]
     total_dists = [torch.zeros((d_mlp, d_mlp), device="cpu") for _ in range(n_layers)]
 
     for b_idx, (in_acts, out_acts) in enumerate(dataset.generate_activations()):
         print('b_idx is ', b_idx)
-        if b_idx >= 100:
+        if b_idx >= 50:
             break
 
         for layer_idx, layer in enumerate(layers):
