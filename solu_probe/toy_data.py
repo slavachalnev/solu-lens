@@ -6,6 +6,8 @@ from torch.utils.data import Dataset, IterableDataset
 class ToyFeatureDataset(Dataset):
     """
     Follows https://www.lesswrong.com/posts/z6QQJbtpkEAX3Aojj/interim-research-report-taking-features-out-of-superposition
+
+    Not currently used in my experiments.
     """
     def __init__(self, h=256, G=512, num_samples=1000, avg_active_features=5, lambda_decay=0.99):
         """
@@ -77,6 +79,8 @@ class ReProjectorDataset(IterableDataset):
                  target_proj=None,
                 ):
         """
+        Follows https://arxiv.org/pdf/2211.09169.pdf, specifically the re-projector task.
+
         args:
             d: number of dimensions
             G: number of ground truth features
