@@ -106,7 +106,7 @@ def process_acts(acts, out_acts, total_dists):
 
 
 @torch.no_grad()
-def mlp_dists(layers, dataset, device):
+def mlp_dists(layers, dataset, device, num_batches=50):
     for layer in layers:
         layer.to(device)
         layer.eval()
@@ -118,7 +118,7 @@ def mlp_dists(layers, dataset, device):
 
     for b_idx, (in_acts, out_acts) in enumerate(dataset.generate_activations()):
         print('b_idx is ', b_idx)
-        if b_idx >= 50:
+        if b_idx >= num_batches:
             break
 
         for layer_idx, layer in enumerate(layers):
@@ -130,7 +130,7 @@ def mlp_dists(layers, dataset, device):
             total_dists[layer_idx] = process_acts(acts, out_acts[layer_idx], total_dists[layer_idx])
 
     # Average across all batches
-    totoal_num_samples = len(dataset) * dataset.batch_size * d_mlp
+    totoal_num_samples = num_batches * dataset.batch_size * d_mlp
     total_dists = [total_dists[layer].cpu().numpy() / totoal_num_samples for layer in range(n_layers)]
 
     # compute optimal permutation of neurons for each layer
