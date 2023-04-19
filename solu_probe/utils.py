@@ -111,10 +111,13 @@ def mlp_dists(layers, dataset, device, num_batches=50):
         layer.to(device)
         layer.eval()
 
-    d_mlp = dataset.model.cfg.d_model * 4
+    d_mlp_model = dataset.model.cfg.d_model * 4
+    d_mlp_layers = layers[0].hidden_size  # assuming all layers have the same number of neurons
+    d_mlp = min(d_mlp_model, d_mlp_layers)
     n_layers = len(layers)
 
-    total_dists = [torch.zeros((d_mlp, d_mlp), device="cpu") for _ in range(n_layers)]
+    total_dists = [torch.zeros((d_mlp_layers, d_mlp_model), device="cpu") for _ in range(n_layers)]
+    total_activation_strengths = [torch.zeros(d_mlp_layers, device="cpu") for _ in range(n_layers)]
 
     for b_idx, (in_acts, out_acts) in enumerate(dataset.generate_activations()):
         print('b_idx is ', b_idx)
@@ -128,16 +131,21 @@ def mlp_dists(layers, dataset, device, num_batches=50):
             out_acts[layer_idx] = out_acts[layer_idx].cpu()
 
             total_dists[layer_idx] = process_acts(acts, out_acts[layer_idx], total_dists[layer_idx])
+            total_activation_strengths[layer_idx] += torch.sum(torch.abs(acts), dim=0)
+
+    # Select top d_mlp neurons based on the sum of activation strengths
+    top_indices = [torch.topk(strengths, d_mlp).indices for strengths in total_activation_strengths]
+    selected_dists = [dists[top_idx] for dists, top_idx in zip(total_dists, top_indices)]
 
     # Average across all batches
-    totoal_num_samples = num_batches * dataset.batch_size * d_mlp
-    total_dists = [total_dists[layer].cpu().numpy() / totoal_num_samples for layer in range(n_layers)]
+    total_num_samples = num_batches * dataset.batch_size * d_mlp
+    selected_dists = [dist.cpu().numpy() / total_num_samples for dist in selected_dists]
 
-    # compute optimal permutation of neurons for each layer
-    perms = [linear_sum_assignment(dist) for dist in total_dists]
+    # Compute optimal permutation of neurons for each layer
+    perms = [linear_sum_assignment(dist) for dist in selected_dists]
 
-    # compute average distance between neurons for each layer after optimal permutation
-    avg_dists = [np.mean(total_dists[layer][perm]) for layer, perm in enumerate(perms)]
+    # Compute average distance between neurons for each layer after optimal permutation
+    avg_dists = [np.mean(selected_dists[layer][perm]) for layer, perm in enumerate(perms)]
 
     return avg_dists
 
