@@ -76,13 +76,14 @@ def main():
     # graft models
     graft_layers = []
     for _ in range(n_layers):
-        graft_layers.append(SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model))
+        # graft_layers.append(SoluMLP(input_size=d_model, hidden_size=d_model*4, output_size=d_model))
+        graft_layers.append(SoluMLP(input_size=d_model, hidden_size=d_model*8, output_size=d_model))
     
     train(layers=graft_layers,
           dataset=dataset,
           writer=writer,
           checkpoints_dir=checkpoints_dir,
-          steps=200001,
+          steps=250001,
           lr=3e-3,
           device=device,
           )
