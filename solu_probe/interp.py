@@ -11,14 +11,13 @@ import numpy as np
 # Import custom big_data_loader from utils.py
 from utils import big_data_loader
 
-# Define helper functions
 
+def merge_top_k_examples(
+        current_top_k: Dict[int, List[Tuple[int, torch.Tensor]]],
+        new_activations: Dict[int, List[Tuple[int, torch.Tensor]]],
+        k: int,
+        ) -> Dict[int, List[Tuple[int, torch.Tensor]]]:
 
-def select_random_neurons(num_neurons: int, total_neurons: int) -> List[int]:
-    return random.sample(range(total_neurons), num_neurons)
-
-
-def merge_top_k_examples(current_top_k: Dict[int, List[Tuple[int, torch.Tensor]]], new_activations: Dict[int, List[Tuple[int, torch.Tensor]]], k: int) -> Dict[int, List[Tuple[int, torch.Tensor]]]:
     merged_top_k = {}
     for neuron in current_top_k.keys():
         merged_activations = current_top_k[neuron] + new_activations[neuron]
@@ -57,7 +56,7 @@ def main(model, dataset_loader):
     total_neurons = 2048  # Replace this with the number of MLP neurons in your model
     top_k = 20
 
-    selected_neurons = select_random_neurons(num_neurons, total_neurons)
+    selected_neurons = random.sample(range(total_neurons), num_neurons)
     top_k_examples = get_example_activations(model, dataset_loader, selected_neurons, top_k)
     store_results_to_json(top_k_examples, dataset_loader, 'results.json')
 
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     model = torch.load('path/to/model.pt')
     model.eval()
 
-    tokenizer = None  # Replace with your tokenizer
+    tokenizer = model.tokenizer
     dataset_loader = big_data_loader(tokenizer=tokenizer, batch_size=8, big=False)
 
     main(model, dataset_loader)
