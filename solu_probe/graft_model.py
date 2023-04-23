@@ -12,7 +12,6 @@ from transformer_lens import HookedTransformer
 
 from dataset import ModelDataset
 from mlp import SoluMLP
-from utils import big_data_loader, mlp_dists
 
 
 def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"):
@@ -41,12 +40,6 @@ def train(layers, dataset, steps, writer, checkpoints_dir, lr=1e-4, device="cpu"
             if batch_idx % 100 == 0:
                 print(f"batch {batch_idx}, layer {layer_idx}, loss {loss.item()}")
                 writer.add_scalar('Layer {}/Loss'.format(layer_idx), loss.item(), batch_idx)
-        
-        if batch_idx % 1000 == 0:
-            dists = mlp_dists(layers=layers, dataset=val_ds, device=device)
-            print(f'batch {batch_idx}, dists is ', dists)
-            for i, dist in enumerate(dists):
-                writer.add_scalar(f"Layer {i}/act_dist", dist, batch_idx)
         
         if batch_idx % 10000 == 0:
             for layer_idx, layer in enumerate(layers):
