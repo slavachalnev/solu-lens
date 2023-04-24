@@ -63,6 +63,12 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
         
     return best_so_far
 
+def extract_chunk(tokens, activations, chunk_size=100):
+    max_index = activations.index(max(activations))
+    start = max(0, max_index - chunk_size // 2)
+    end = min(len(tokens), max_index + chunk_size // 2)
+    return tokens[start:end], activations[start:end]
+
 
 def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: str):
     """
@@ -75,14 +81,22 @@ def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: 
         for example in neuron_best_examples:
             neuron = example["neuron"]
             tokens = example["tokens"]
-            tokens_text = tokenizer.decode(tokens)
             activations = example["activations"].tolist()
             max_activation = example["max_activation"]
 
+            # Extract the chunk of tokens and activations around the max activation token
+            chunk_tokens, chunk_activations = extract_chunk(tokens, activations)
+
+            # Decode the chunk of tokens to text
+            tokens_text = tokenizer.decode(chunk_tokens)
+
+            # Create token-activation pairs for the chunk of tokens and activations
+            token_activation_pairs = [(tokenizer.decode(token), activation) for token, activation in zip(chunk_tokens, chunk_activations)]
+
             examples.append({
                 "tokens": tokens_text,
-                "activations": activations,
-                "max_activation": max_activation
+                "max_activation": max_activation,
+                "token_activation_pairs": token_activation_pairs
             })
 
         if examples:
@@ -90,7 +104,6 @@ def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: 
 
     with open(filename, 'w') as f:
         json.dump(results, f, indent=4)
-
 
 # Main function to select random neurons, find top examples, and save the results
 
