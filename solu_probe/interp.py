@@ -26,7 +26,7 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
         selected_for_layer = [n - d_mlp*layer for n in selected_for_layer]
 
         def hook(value, hook):
-            acts_cache[layer] = value[:, :, selected_for_layer]
+            acts_cache[layer] = value[:, :, selected_for_layer].detach().cpu() # shape is (batch_size, seq_len, n_neurons)
             return value
 
         return hook
@@ -37,6 +37,10 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
 
     best_so_far = [[] for _ in range(n_neurons)] # list of lists of {neuron, activations, tokens, max_activation}
     for batch_idx, batch in enumerate(dataset_loader):
+
+        if batch_idx == 5:
+            break
+
         with model.hooks(fwd_hooks=fwd_hooks), torch.no_grad():
             model(batch["tokens"], return_type="loss")
         
@@ -60,19 +64,32 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
     return best_so_far
 
 
-def store_results_to_json(top_k_activations: Dict[int, List[Tuple[int, torch.Tensor]]], dataset_loader, filename: str):
+def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: str):
+    """
+    Stores the top k activations for each neuron along with the corresponding input tokens in a JSON file.
+    """
+
     results = {}
-    for neuron, activation_list in top_k_activations.items():
-        results[neuron] = []
-        for example_idx, activation in activation_list:
-            data, _ = dataset_loader.dataset[example_idx]
-            results[neuron].append({
-                'tokens': data.tolist(),
-                'activations': activation.tolist(),
-                'max_activation': torch.max(activation).item()
+    for neuron_best_examples in best_examples:
+        examples = []
+        for example in neuron_best_examples:
+            neuron = example["neuron"]
+            tokens = example["tokens"]
+            tokens_text = tokenizer.decode(tokens)
+            activations = example["activations"].tolist()
+            max_activation = example["max_activation"]
+
+            examples.append({
+                "tokens": tokens_text,
+                "activations": activations,
+                "max_activation": max_activation
             })
+
+        if examples:
+            results[str(neuron)] = {"examples": examples}
+
     with open(filename, 'w') as f:
-        json.dump(results, f)
+        json.dump(results, f, indent=4)
 
 
 # Main function to select random neurons, find top examples, and save the results
@@ -84,15 +101,13 @@ def main(model, dataset_loader):
 
     selected_neurons = random.sample(range(total_neurons), num_neurons)
     top_k_examples = get_top_examples(model, dataset_loader, selected_neurons, top_k)
-    print(top_k_examples)
-    # store_results_to_json(top_k_examples, dataset_loader, 'results.json')
+    store_results_to_json(best_examples=top_k_examples, tokenizer=tokenizer, filename="top_examples.json")
 
 if __name__ == "__main__":
-    # model = torch.load('path/to/model.pt')
-    # model.eval()
     model = HookedTransformer.from_pretrained('gelu-4l')
 
     tokenizer = model.tokenizer
+    print(dir(tokenizer))
     dataset_loader = big_data_loader(tokenizer=tokenizer, batch_size=8, big=False)
 
     main(model, dataset_loader)
