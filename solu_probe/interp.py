@@ -17,8 +17,7 @@ from utils import big_data_loader
 
 
 def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
-    # hooks to extract neuron activations
-    d_mlp = 2048
+    d_mlp = model.cfg.d_mlp
     n_neurons = len(neurons)
     acts_cache = [None for _ in range(len(model.blocks))]
 
@@ -104,22 +103,22 @@ def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: 
     with open(filename, 'w') as f:
         json.dump(results, f, indent=4)
 
-# Main function to select random neurons, find top examples, and save the results
 
-def main(model, dataset_loader):
-    num_neurons = 10
-    total_neurons = 2048 * len(model.blocks)
+def main(model, dataset_loader, save_path):
+    num_neurons = 100
+    total_neurons = model.cfg.d_mlp * len(model.blocks)
     top_k = 20
 
     selected_neurons = random.sample(range(total_neurons), num_neurons)
     top_k_examples = get_top_examples(model, dataset_loader, selected_neurons, top_k)
-    store_results_to_json(best_examples=top_k_examples, tokenizer=tokenizer, filename="top_examples.json")
+    store_results_to_json(best_examples=top_k_examples, tokenizer=tokenizer, filename=save_path)
 
 if __name__ == "__main__":
+    model_name = "gelu-4l"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HookedTransformer.from_pretrained('gelu-4l', device=device)
+    model = HookedTransformer.from_pretrained(model_name, device=device)
 
     tokenizer = model.tokenizer
     dataset_loader = big_data_loader(tokenizer=tokenizer, batch_size=8, big=False)
 
-    main(model, dataset_loader)
+    main(model, dataset_loader, save_path=f"{model_name}.json")
