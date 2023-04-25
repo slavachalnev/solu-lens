@@ -4,6 +4,8 @@ import json
 from torch.utils.data import DataLoader
 from typing import List, Dict, Tuple
 
+from tqdm import tqdm
+
 # Import necessary libraries
 import torch.nn as nn
 import numpy as np
@@ -36,10 +38,7 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
         fwd_hooks.append((f"blocks.{layer}.mlp.hook_post", get_activation_hook(layer)))
 
     best_so_far = [[] for _ in range(n_neurons)] # list of lists of {neuron, activations, tokens, max_activation}
-    for batch_idx, batch in enumerate(dataset_loader):
-
-        if batch_idx == 5:
-            break
+    for batch_idx, batch in tqdm(enumerate(dataset_loader)):
 
         with model.hooks(fwd_hooks=fwd_hooks), torch.no_grad():
             model(batch["tokens"], return_type="loss")
@@ -62,6 +61,7 @@ def get_top_examples(model, dataset_loader, neurons: List[int], k: int):
             best_so_far[j] = sorted(best_so_far[j], key=lambda x: x["max_activation"], reverse=True)[:k]
         
     return best_so_far
+
 
 def extract_chunk(tokens, activations, chunk_size=100):
     max_index = activations.index(max(activations))
@@ -94,13 +94,12 @@ def store_results_to_json(best_examples: List[List[Dict]], tokenizer, filename: 
             token_activation_pairs = [(tokenizer.decode(token), activation) for token, activation in zip(chunk_tokens, chunk_activations)]
 
             examples.append({
-                "tokens": tokens_text,
+                "text": tokens_text,
                 "max_activation": max_activation,
                 "token_activation_pairs": token_activation_pairs
             })
 
-        if examples:
-            results[str(neuron)] = {"examples": examples}
+        results[str(neuron)] = examples
 
     with open(filename, 'w') as f:
         json.dump(results, f, indent=4)
@@ -117,10 +116,10 @@ def main(model, dataset_loader):
     store_results_to_json(best_examples=top_k_examples, tokenizer=tokenizer, filename="top_examples.json")
 
 if __name__ == "__main__":
-    model = HookedTransformer.from_pretrained('gelu-4l')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = HookedTransformer.from_pretrained('gelu-4l', device=device)
 
     tokenizer = model.tokenizer
-    print(dir(tokenizer))
     dataset_loader = big_data_loader(tokenizer=tokenizer, batch_size=8, big=False)
 
     main(model, dataset_loader)
