@@ -14,3 +14,10 @@ I took the toy dataset setup, the monosemanticity metric, and the plot layout fr
 
 ## Results
 ![alt text](assets/all_plots.png "One run. Sparse power-law features.")
+
+## Next steps
+
+- Measure interpretability of real models
+    - Same approach as the SoLU paper. I'm working on this here: https://github.com/slavachalnev/NeuronLabel
+- Vary sparsity and see how it affects monosemanticity and effectiveness of my approach.
+- Improve grafting procedure.
