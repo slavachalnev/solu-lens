@@ -15,7 +15,7 @@ class SoLU(nn.Module):
 
 
 class SoluMLP(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, output_size: int, norm=True, skip=False, temp=1.0, alpha=1.0):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, norm=True, skip=False, temp=1.0, alpha=1.0, pre_gelu=False):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -29,6 +29,11 @@ class SoluMLP(nn.Module):
         self.temperature = temp
         self.alpha = alpha
         self.skip = skip
+
+        if pre_gelu:
+            self.pre_gelu = nn.GELU()
+        else:
+            self.pre_gelu = None
     
     def forward(self, x, return_activations=False):
         """
@@ -36,6 +41,10 @@ class SoluMLP(nn.Module):
             return_activations: if True, only return the activations of the first layer.
         """
         h = self.fc1(x)
+
+        if self.pre_gelu is not None:
+            h = self.pre_gelu(h)
+
         h = self.activation(h, temperature=self.temperature, alpha=self.alpha)
 
         if return_activations:
