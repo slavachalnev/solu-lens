@@ -14,6 +14,17 @@ class SoLU(nn.Module):
         return (1 - alpha) * gelu + alpha * solu
 
 
+class GSoLU(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(x, dim=-1, temp=1.0):
+        x = x / temp
+        x_max = x.max(dim, keepdim=True).values
+        e_x = torch.exp(x - x_max)
+        return (x * e_x) / torch.sum(e_x, dim, keepdim=True)
+
+
 class SoluMLP(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int, norm=True, skip=False, temp=1.0, alpha=1.0, pre_gelu=False):
         super().__init__()
@@ -58,6 +69,32 @@ class SoluMLP(nn.Module):
             h = h + x
 
         return h
+    
+
+class GSoLUMLP(nn.Module):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, temp=1.0):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+
+        self.activation = GSoLU()
+        self.temperature = temp
+    
+    def forward(self, x, return_activations=False):
+        """
+        args:
+            return_activations: if True, only return the activations of the first layer.
+        """
+        h = self.fc1(x)
+        h = self.activation(h, temp=self.temperature)
+        if return_activations:
+            return h
+        h = self.fc2(h)
+        return h
+
 
 class GeluMLP(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int, skip=False):
