@@ -18,7 +18,7 @@ class GSoLU(nn.Module):
     def __init__(self):
         super().__init__()
     
-    def forward(x, dim=-1, temp=1.0):
+    def forward(self, x, dim=-1, temp=1.0):
         x = x / temp
         x_max = x.max(dim, keepdim=True).values
         e_x = torch.exp(x - x_max)
