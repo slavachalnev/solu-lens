@@ -57,7 +57,45 @@ class SoluMLP(nn.Module):
             h = h + x
 
         return h
+
+
+class GatedSoLU(nn.Module):
+    # uses solu as gating function
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, norm, softmax=False):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+
+        self.fc_g = nn.Linear(input_size, hidden_size)
+        self.fc_x = nn.Linear(input_size, hidden_size)
+        self.fc_f = nn.Linear(hidden_size, output_size)
+
+        if norm:
+            self.layer_norm = nn.LayerNorm(hidden_size)
+        self.norm = norm
+
+        if softmax:
+            self.act = nn.Softmax(dim=-1)
+        else:
+            self.act = SoLU()
     
+    def forward(self, x, return_activations=False):
+        g = self.fc_g(x)
+        x = self.fc_x(x)
+        g = self.act(g)
+        h = x * g
+
+        if return_activations:
+            return h
+
+        if self.norm:
+            h = self.layer_norm(h)
+
+        h = self.fc_f(h)
+
+        return h
+
 
 class GeluMLP(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int, skip=False):
