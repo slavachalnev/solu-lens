@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.cuda.amp as amp
 
 from toy_data import ReProjectorDataset
-from mlp import GeluMLP, SoluMLP
+from mlp import GeluMLP, SoluMLP, GatedSoLU
 from utils import measure_monosemanticity
 
 
@@ -167,7 +167,7 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
     G = 512
     graft_steps = 200000
     warmup_steps = 200000
-    train_steps = 1000000
+    train_steps = 2000000
     batch_size = 65536
     learning_rate = 5e-3
 
@@ -206,6 +206,14 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
 
     layernorm = nn.LayerNorm(d)
     gelu_mlp = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+
+    # experiment: replace original gelu with solu (and also try solu_plus_gelu)
+    # gelu_mlp = SoluMLP(input_size=d, hidden_size=d*4, output_size=d, norm=False, pre_gelu=True)  # solu_plus_gelu
+    # gelu_mlp = SoluMLP(input_size=d, hidden_size=d*4, output_size=d) # solu
+
+    # gelu_mlp = GatedSoLU(input_size=d, hidden_size=(d*8)//3, output_size=d, norm=True, softmax=True) # gated softmax
+    # gelu_mlp = GatedSoLU(input_size=d, hidden_size=(d*8)//3, output_size=d, norm=True, softmax=False) # gated solu
+    # gelu_mlp = GatedSoLU(input_size=d, hidden_size=d*4, output_size=d, norm=True, softmax=False) # gated solu
 
     # Load pre-trained models if paths are provided
     if pre_trained_layernorm:
@@ -247,6 +255,10 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
         "learning_rate": learning_rate,
     }
 
+    model = GatedSoLU(input_size=d, hidden_size=d*4, output_size=d, norm=True, softmax=False)
+    train(model=model, name="graft_gate_solu", **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
+
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, name="graft_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
@@ -255,9 +267,9 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
     train(model=model, name="graft_big_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
 
-    # model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-    # train(model=model, name="graft_gelu", **graft_kwargs)
-    # torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
+    model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    train(model=model, name="graft_gelu", **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
     # model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
     # train(model=model, name="graft_big_gelu", **graft_kwargs)
