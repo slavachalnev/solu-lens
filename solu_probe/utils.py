@@ -6,6 +6,7 @@ from scipy.optimize import linear_sum_assignment
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 
 import torch.cuda.amp as amp
@@ -27,6 +28,38 @@ class OneHotDataset(Dataset):
         sample[idx] = 1
 
         return sample @ self.proj, idx
+
+
+@torch.no_grad()
+def interference(model, p1, p2, norm=None):
+    """
+    p1 and p2 are shape (n_features, d_model)
+    """
+    d_feats, d_model = p1.shape
+
+    if norm is None:
+        norm = nn.LayerNorm(d_model, elementwise_affine=False)
+    
+    # compute decompression matrix using pseudoinverse
+    decomp = torch.linalg.pinv(p2)
+
+    reprojection_losses = []
+    decompression_losses = []
+
+    for feat_idx in range(d_feats):
+        # compress 1-hot feature to d_model, norm, pass through model, uncompress
+        feat = p1[feat_idx, :].unsqueeze(0)
+        feat = norm(feat)
+        out = model(feat)
+        out = out @ decomp
+
+        loss = F.cross_entropy(out, torch.tensor([feat_idx]))
+        reprojection_losses.append(loss.item())
+
+        target = p2[feat_idx, :].unsqueeze(0)
+        decompression_losses.append(F.cross_entropy(target, torch.tensor([feat_idx])))
+        
+    return reprojection_losses, decompression_losses
 
 
 @torch.no_grad()
