@@ -31,7 +31,7 @@ class OneHotDataset(Dataset):
 
 
 @torch.no_grad()
-def interference(model, p1, p2, norm=None):
+def interference(model, p1, p2, norm=None, additional_feat_idx=None):
     """
     p1 and p2 are shape (n_features, d_model)
     """
@@ -46,20 +46,37 @@ def interference(model, p1, p2, norm=None):
     reprojection_losses = []
     decompression_losses = []
 
+    # we need to do values instead of losses.
+    # So I think we should build out a d_feat x d_feat tensor.
+    # Where we have activating_feature vs reprojected result.
+
+    # we want picture!
+    pic = torch.zeros((d_feats, d_feats))
+
     for feat_idx in range(d_feats):
-        # compress 1-hot feature to d_model, norm, pass through model, uncompress
-        feat = p1[feat_idx, :].unsqueeze(0)
-        feat = norm(feat)
+
+        selected = torch.zeros(d_feats)
+        if additional_feat_idx is not None:
+            selected[additional_feat_idx] = 1
+        selected[feat_idx] = 1
+
+        feat = selected @ p1
+        feat = norm(feat.unsqueeze(0))
         out = model(feat)
         out = out @ decomp
 
-        loss = F.cross_entropy(out, torch.tensor([feat_idx]))
-        reprojection_losses.append(loss.item())
+        pic[feat_idx, :] = out
 
-        target = p2[feat_idx, :].unsqueeze(0)
-        decompression_losses.append(F.cross_entropy(target, torch.tensor([feat_idx])))
-        
-    return reprojection_losses, decompression_losses
+        # # loss = F.cross_entropy(out, torch.tensor([feat_idx]))
+        # targ = torch.zeros_like(out)
+        # targ[0][feat_idx] = 1
+        # loss = loss_function(out, targ)
+        # reprojection_losses.append(loss.item())
+
+        # target = p2[feat_idx, :].unsqueeze(0)
+        # decompression_losses.append(F.cross_entropy(target @ decomp, torch.tensor([feat_idx])))
+
+    return pic #reprojection_losses, decompression_losses
 
 
 @torch.no_grad()
