@@ -1,4 +1,5 @@
 import time
+import os
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -30,7 +31,7 @@ class OneHotDataset(Dataset):
 
 
 @torch.no_grad()
-def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir=None, device="cpu"):
+def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_path=None, device="cpu"):
     """
     model: a d -> h -> d mlp.
     projection_matrix: np array that projects G -> d.
@@ -64,8 +65,6 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir
     monosemanticity = max_activations / (sum_activations + 1e-10)
 
     if plot:
-        # os.makedirs(plot_dir, exist_ok=True)
-
         # Sort neurons by monosemanticity
         sorted_neurons = torch.argsort(monosemanticity, descending=True)
 
@@ -88,7 +87,12 @@ def measure_monosemanticity(model, projection_matrix, norm, plot=False, plot_dir
         plt.ylabel('Neurons')
         plt.title('Neuron Activations by Features')
         plt.colorbar(label='Activation')
-        plt.show()
+
+        if plot_path is not None:
+            os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+            plt.savefig(plot_path)
+        else:
+            plt.show()
 
     return monosemanticity
 

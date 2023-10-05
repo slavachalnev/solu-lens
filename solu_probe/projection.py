@@ -156,7 +156,8 @@ def do_analysis(checkpoint_dir):
 
         # analyse model
         print('analyzing', model_name)
-        monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu", plot=True)
+        plot_path = f"{checkpoint_dir}/plots/{model_name}.png"
+        monosemanticity = measure_monosemanticity(model, dataset.proj, layernorm, device="cpu", plot=True, plot_path=plot_path)
         print('monosemanticity', monosemanticity.mean().item())
         print('monosemanticity max', monosemanticity.max().item())
         np_mono = monosemanticity.cpu().numpy()
