@@ -108,7 +108,7 @@ class GeluMLP(nn.Module):
         self.activation = nn.GELU()
         self.skip = skip
     
-    def forward(self, x, return_activations=False):
+    def forward(self, x, return_activations=False, return_both=False):
         """
         args:
             return_activations: if True, only return the activations of the first layer.
@@ -119,10 +119,13 @@ class GeluMLP(nn.Module):
         if return_activations:
             return h
 
-        h = self.fc2(h)
+        out = self.fc2(h)
 
         if self.skip:
-            h = h + x
+            out = out + x
 
-        return h
+        if return_both:
+            return out, h
+        else:
+            return out
     

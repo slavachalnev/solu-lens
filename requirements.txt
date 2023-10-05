@@ -7,4 +7,4 @@ tensorboard>=2.12.0
 tokenizers>=0.13.2
 torch>=1.13.1
 tqdm>=4.65.0
-transformer-lens @ git+https://github.com/neelnanda-io/TransformerLens
+transformer-lens

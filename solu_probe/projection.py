@@ -29,6 +29,7 @@ def train(model,
           warmup_steps=0,
           batch_size=65536,
           learning_rate=5e-3,
+          reg=0,
           device="cpu",
           ):
 
@@ -77,8 +78,18 @@ def train(model,
 
         optimizer.zero_grad()
         with amp.autocast():
-            output = model(sample)
+            if reg > 0:
+                output, hidden = model(sample, return_both=True)
+            else:
+                output = model(sample)
+
             loss = criterion(output, target)
+
+            if reg > 0:
+                # l1 norm averaged over batch
+                loss += reg * torch.norm(hidden, p=1, dim=-1).mean()
+
+
         # t2 = time.time()
         # print('forward pass took \t', t2 - t1, 'seconds.')
         scaler.scale(loss).backward()
@@ -130,9 +141,9 @@ def do_analysis(checkpoint_dir):
     for model_name in model_names:
         model_dict = torch.load(f"{checkpoint_dir}/{model_name}.pt", map_location="cpu")
 
-        if model_name in ['gelu_mlp', 'graft_gelu']:
+        if model_name in ['gelu_mlp', 'graft_gelu', 'graft_gelu_reg']:
             model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
-        elif model_name in ['graft_big_gelu']:
+        elif model_name in ['graft_big_gelu', 'graft_big_gelu_reg']:
             model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
         elif model_name in ['graft_solu']:
             model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
@@ -166,7 +177,8 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
     d = 64
     G = 512
     graft_steps = 200000
-    warmup_steps = 200000
+    # warmup_steps = 200000
+    warmup_steps = 0
     train_steps = 2000000
     batch_size = 65536
     learning_rate = 5e-3
@@ -255,25 +267,35 @@ def main(run_num, name, pre_trained_gelu_mlp=None, pre_trained_layernorm=None, d
         "learning_rate": learning_rate,
     }
 
-    model = GatedSoLU(input_size=d, hidden_size=d*4, output_size=d, norm=True, softmax=False)
-    train(model=model, name="graft_gate_solu", **graft_kwargs)
-    torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
+    reg = 1e-3
+
+    # model = GatedSoLU(input_size=d, hidden_size=d*4, output_size=d, norm=True, softmax=False)
+    # train(model=model, name="graft_gate_solu", **graft_kwargs)
+    # torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
+
+    model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
+    train(model=model, name="graft_gelu_reg", reg=reg, **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_gelu_reg.pt")
 
     model = SoluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, name="graft_solu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_solu.pt")
 
-    model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    train(model=model, name="graft_big_solu", **graft_kwargs)
-    torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
-
     model = GeluMLP(input_size=d, hidden_size=d*4, output_size=d)
     train(model=model, name="graft_gelu", **graft_kwargs)
     torch.save(model.state_dict(), f"{out_dir}/graft_gelu.pt")
 
-    # model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
-    # train(model=model, name="graft_big_gelu", **graft_kwargs)
-    # torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
+    model = SoluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    train(model=model, name="graft_big_solu", **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_big_solu.pt")
+
+    model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    train(model=model, name="graft_big_gelu", **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu.pt")
+
+    model = GeluMLP(input_size=d, hidden_size=d*8, output_size=d)
+    train(model=model, name="graft_big_gelu_reg", reg=reg, **graft_kwargs)
+    torch.save(model.state_dict(), f"{out_dir}/graft_big_gelu_reg.pt")
 
     writer.close()
 
